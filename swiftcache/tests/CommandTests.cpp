@@ -93,5 +93,23 @@ int main() {
     assert(run(registry, store, {"SMEMBERS", "tags"}).response == "cache\nsystems\n");
     assert(run(registry, store, {"SADD", "word", "nope"}).response == "ERR wrong type for SADD\n");
 
+    assert(run(registry, store, {"SET", "key:string", "value"}).response == "OK\n");
+    assert(run(registry, store, {"LPUSH", "key:list", "left"}).response == "1\n");
+    assert(run(registry, store, {"HSET", "key:hash", "field", "value"}).response == "1\n");
+    assert(run(registry, store, {"SADD", "key:set", "member"}).response == "1\n");
+    assert(run(registry, store, {"TYPE", "key:string"}).response == "string\n");
+    assert(run(registry, store, {"TYPE", "key:list"}).response == "list\n");
+    assert(run(registry, store, {"TYPE", "key:hash"}).response == "hash\n");
+    assert(run(registry, store, {"TYPE", "key:set"}).response == "set\n");
+    assert(run(registry, store, {"TYPE", "key:missing"}).response == "none\n");
+    assert(run(registry, store, {"KEYS", "key:*"}).response ==
+           "key:hash\nkey:list\nkey:set\nkey:string\n");
+    assert(run(registry, store, {"RENAME", "key:string", "key:string2"}).response == "OK\n");
+    assert(run(registry, store, {"GET", "key:string2"}).response == "value\n");
+    assert(run(registry, store, {"SCAN", "0", "MATCH", "key:*"}).response ==
+           "0\nkey:hash\nkey:list\nkey:set\nkey:string2\n");
+    assert(run(registry, store, {"FLUSHDB"}).response == "OK\n");
+    assert(run(registry, store, {"KEYS"}).response == "");
+
     return 0;
 }

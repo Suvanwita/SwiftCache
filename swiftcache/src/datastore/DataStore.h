@@ -93,12 +93,17 @@ public:
     std::optional<bool> sismember(const std::string& key, const std::string& member);
     SetMembersResult smembers(const std::string& key);
     std::optional<std::size_t> scard(const std::string& key);
+    std::vector<std::string> keys(const std::string& pattern = "*");
+    std::string type(const std::string& key);
+    bool rename(const std::string& source, const std::string& destination);
+    void flushdb();
     std::size_t removeExpired();
     StoreStats stats() const;
 
 private:
     static long long nowMillis();
     static bool parseInteger(const std::string& value, long long& parsed);
+    static bool matchesPattern(const std::string& value, const std::string& pattern);
     static std::pair<std::size_t, std::size_t> normalizeRange(long long start, long long stop,
                                                               std::size_t size);
     bool isExpired(const ValueObject& object, long long now) const;

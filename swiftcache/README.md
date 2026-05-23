@@ -16,6 +16,7 @@ The current implementation supports strings, lists, hashes, sets, TTL, automatic
 - Typed values: string, list, hash, and set
 - TTL support with lazy expiration on access
 - Background expiry worker running once per second
+- Keyspace inspection with `KEYS`, `TYPE`, `SCAN`, `RENAME`, and `FLUSHDB`
 - Server metrics through `INFO`
 - CMake and Makefile build support
 - Unit tests for core command behavior
@@ -31,6 +32,7 @@ swiftcache/
 │   ├── parser/
 │   ├── commands/
 │   │   ├── hash/
+│   │   ├── key/
 │   │   ├── list/
 │   │   ├── set/
 │   │   ├── string/
@@ -131,6 +133,11 @@ Current parser support is intentionally simple. Values with spaces are not yet s
 | --- | --- |
 | `DEL key` | Deletes a key. Returns `1` if removed, otherwise `0`. |
 | `EXISTS key` | Returns `1` if the key exists and is not expired, otherwise `0`. |
+| `KEYS [pattern]` | Returns keys matching a glob-style pattern. Defaults to `*`. |
+| `TYPE key` | Returns `string`, `list`, `hash`, `set`, or `none`. |
+| `RENAME source destination` | Renames an existing key while preserving its value and TTL. |
+| `FLUSHDB` | Removes all keys from the current datastore. |
+| `SCAN 0 [MATCH pattern]` | Returns cursor `0` and a sorted snapshot of matching keys. |
 
 ### TTL Commands
 
@@ -205,10 +212,29 @@ SET name swiftcache
 OK
 EXISTS name
 1
+TYPE name
+string
+KEYS n*
+name
+RENAME name project:name
+OK
+SCAN 0 MATCH project:*
+0
+project:name
 DEL name
+0
+DEL project:name
 1
-GET name
+GET project:name
 (nil)
+```
+
+```text
+SET temp value
+OK
+FLUSHDB
+OK
+KEYS
 ```
 
 ### Strings

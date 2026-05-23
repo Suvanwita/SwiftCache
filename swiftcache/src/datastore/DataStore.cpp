@@ -25,6 +25,35 @@ bool DataStore::parseInteger(const std::string& value, long long& parsed) {
     }
 }
 
+bool DataStore::matchesPattern(const std::string& value, const std::string& pattern) {
+    std::size_t valueIndex = 0;
+    std::size_t patternIndex = 0;
+    std::size_t starIndex = std::string::npos;
+    std::size_t matchIndex = 0;
+
+    while (valueIndex < value.size()) {
+        if (patternIndex < pattern.size() &&
+            (pattern[patternIndex] == '?' || pattern[patternIndex] == value[valueIndex])) {
+            ++valueIndex;
+            ++patternIndex;
+        } else if (patternIndex < pattern.size() && pattern[patternIndex] == '*') {
+            starIndex = patternIndex++;
+            matchIndex = valueIndex;
+        } else if (starIndex != std::string::npos) {
+            patternIndex = starIndex + 1;
+            valueIndex = ++matchIndex;
+        } else {
+            return false;
+        }
+    }
+
+    while (patternIndex < pattern.size() && pattern[patternIndex] == '*') {
+        ++patternIndex;
+    }
+
+    return patternIndex == pattern.size();
+}
+
 std::pair<std::size_t, std::size_t> DataStore::normalizeRange(long long start, long long stop,
                                                               std::size_t size) {
     if (size == 0) {
@@ -657,6 +686,62 @@ std::optional<std::size_t> DataStore::scard(const std::string& key) {
     }
 
     return it->second.set.size();
+}
+
+std::vector<std::string> DataStore::keys(const std::string& pattern) {
+    removeExpired();
+
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::vector<std::string> result;
+    for (const auto& entry : values_) {
+        if (matchesPattern(entry.first, pattern)) {
+            result.push_back(entry.first);
+        }
+    }
+
+    std::sort(result.begin(), result.end());
+    return result;
+}
+
+std::string DataStore::type(const std::string& key) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const auto it = values_.find(key);
+    if (it == values_.end()) {
+        return "none";
+    }
+
+    if (isExpired(it->second, nowMillis())) {
+        values_.erase(it);
+        return "none";
+    }
+
+    return it->second.type;
+}
+
+bool DataStore::rename(const std::string& source, const std::string& destination) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = values_.find(source);
+    if (it == values_.end()) {
+        return false;
+    }
+
+    if (isExpired(it->second, nowMillis())) {
+        values_.erase(it);
+        return false;
+    }
+
+    if (source == destination) {
+        return true;
+    }
+
+    values_[destination] = std::move(it->second);
+    values_.erase(it);
+    return true;
+}
+
+void DataStore::flushdb() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    values_.clear();
 }
 
 std::size_t DataStore::removeExpired() {
