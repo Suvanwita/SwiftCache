@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cstdint>
 
+#include "../core/AofPersistence.h"
 #include "../core/CommandRegistry.h"
 #include "../core/ServerMetrics.h"
 #include "../datastore/DataStore.h"
@@ -12,7 +13,8 @@ namespace swiftcache {
 
 class TcpServer {
 public:
-    TcpServer(std::uint16_t port, DataStore& store, const CommandRegistry& registry, ServerMetrics& metrics);
+    TcpServer(std::uint16_t port, DataStore& store, const CommandRegistry& registry,
+              ServerMetrics& metrics, AofPersistence* aof = nullptr);
 
     bool start();
     void stop();
@@ -26,6 +28,7 @@ private:
     DataStore& store_;
     const CommandRegistry& registry_;
     ServerMetrics& metrics_;
+    AofPersistence* aof_;
     CommandParser parser_;
     int serverFd_{-1};
     std::atomic<bool> running_{false};

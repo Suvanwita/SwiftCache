@@ -1,10 +1,12 @@
 #include <cassert>
 #include <chrono>
+#include <filesystem>
 #include <string>
 #include <thread>
 #include <vector>
 
 #include "../src/commands/CommandFactory.h"
+#include "../src/core/AofPersistence.h"
 #include "../src/datastore/DataStore.h"
 #include "../src/parser/CommandParser.h"
 
@@ -131,6 +133,22 @@ int main() {
            "0\nkey:hash\nkey:list\nkey:set\nkey:string2\n");
     assert(run(registry, store, {"FLUSHDB"}).response == "OK\n");
     assert(run(registry, store, {"KEYS"}).response == "");
+
+    const std::string aofPath = "/tmp/swiftcache-command-tests.aof";
+    std::filesystem::remove(aofPath);
+    swiftcache::AofPersistence aof(aofPath);
+    assert(aof.append({"SET", "persisted:string", "value"}));
+    assert(aof.append({"SADD", "persisted:set", "one", "two"}));
+    assert(aof.append({"HSET", "persisted:hash", "field", "value"}));
+    assert(aof.append({"EXPIRE", "persisted:string", "120"}));
+
+    swiftcache::DataStore replayedStore;
+    assert(aof.replay(registry, replayedStore));
+    assert(run(registry, replayedStore, {"GET", "persisted:string"}).response == "value\n");
+    assert(run(registry, replayedStore, {"SMEMBERS", "persisted:set"}).response == "one\ntwo\n");
+    assert(run(registry, replayedStore, {"HGET", "persisted:hash", "field"}).response == "value\n");
+    assert(std::stoll(run(registry, replayedStore, {"TTL", "persisted:string"}).response) > 0);
+    std::filesystem::remove(aofPath);
 
     return 0;
 }

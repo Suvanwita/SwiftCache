@@ -9,6 +9,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(Threads REQUIRED)
 
 set(SWIFTCACHE_SOURCES
+    src/core/AofPersistence.cpp
     src/core/CommandRegistry.cpp
     src/core/ExpiryWorker.cpp
     src/core/ServerMetrics.cpp
@@ -60,6 +61,7 @@ target_link_libraries(swiftcache_core PUBLIC Threads::Threads)
 
 add_executable(SwiftCache src/main.cpp)
 target_link_libraries(SwiftCache PRIVATE swiftcache_core)
+target_compile_definitions(SwiftCache PRIVATE SWIFTCACHE_AOF_PATH="${CMAKE_SOURCE_DIR}/storage/swiftcache.aof")
 
 add_executable(swiftcache_tests tests/CommandTests.cpp)
 target_link_libraries(swiftcache_tests PRIVATE swiftcache_core)

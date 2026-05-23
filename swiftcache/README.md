@@ -2,7 +2,7 @@
 
 SwiftCache is a Redis-inspired in-memory datastore written in C++17. 
 
-The current implementation supports strings, lists, hashes, sets, TTL, automatic expiration, basic server metrics, inline text commands, RESP requests, and multiple threaded TCP clients on `localhost:6379`.
+The current implementation supports strings, lists, hashes, sets, TTL, automatic expiration, append-only file persistence, basic server metrics, inline text commands, RESP requests, and multiple threaded TCP clients on `localhost:6379`.
 
 
 ## Features
@@ -18,6 +18,7 @@ The current implementation supports strings, lists, hashes, sets, TTL, automatic
 - Typed values: string, list, hash, and set
 - TTL support with lazy expiration on access
 - Background expiry worker running once per second
+- Append-only file persistence with startup replay
 - Keyspace inspection with `KEYS`, `TYPE`, `SCAN`, `RENAME`, and `FLUSHDB`
 - Server metrics through `INFO`
 - CMake and Makefile build support
@@ -50,7 +51,7 @@ swiftcache/
 
 ## Architecture
 
-- `core/` defines command abstractions, the command registry, server metrics, and expiry worker.
+- `core/` defines command abstractions, the command registry, server metrics, expiry worker, and AOF persistence.
 - `commands/` contains domain-specific command implementations grouped by data type.
 - `datastore/` owns typed in-memory storage and synchronization.
 - `parser/` converts client input into command tokens.
@@ -58,6 +59,8 @@ swiftcache/
 - `storage/` is reserved for future persistence work.
 
 The datastore uses `ValueObject` with typed payloads for strings, lists, hashes, and sets. All datastore operations are protected by a mutex, and expiration is enforced both lazily during access and actively by the expiry worker.
+
+Mutating commands are appended to `storage/swiftcache.aof` as RESP frames after successful execution. On startup, SwiftCache replays the AOF before accepting clients.
 
 ## Requirements
 
@@ -139,6 +142,52 @@ RESP clients receive RESP-formatted replies:
 ```
 
 For RESP requests, SwiftCache does not send the inline greeting, so clients can parse the first server reply as a protocol response.
+
+## Persistence
+
+SwiftCache uses append-only file persistence for mutating commands. The AOF file is stored at:
+
+```text
+storage/swiftcache.aof
+```
+
+Logged commands include writes and keyspace mutations such as:
+
+- `SET`, `MSET`, `DEL`
+- `EXPIRE`, `PERSIST`
+- `INCR`, `DECR`, `APPEND`
+- `LPUSH`, `RPUSH`, `LPOP`, `RPOP`
+- `HSET`, `HDEL`
+- `SADD`, `SREM`
+- `RENAME`, `FLUSHDB`
+
+Read-only commands such as `GET`, `TTL`, `KEYS`, `INFO`, and `SMEMBERS` are not written to the AOF.
+
+To verify persistence:
+
+1. Start SwiftCache.
+2. Write data:
+
+```text
+SET persisted value
+OK
+SADD tags cache systems
+2
+```
+
+3. Stop the server.
+4. Start it again.
+5. Read the data:
+
+```text
+GET persisted
+value
+SMEMBERS tags
+cache
+systems
+```
+
+The AOF is intentionally simple and append-only. Compaction and snapshotting are future persistence improvements.
 
 ## Command Reference
 
@@ -406,13 +455,12 @@ For new data types, extend `ValueObject` and add typed operations to `DataStore`
 make -C swiftcache test
 ```
 
-The current tests cover inline parsing, RESP request parsing, strings, TTL, lists, hashes, sets, and keyspace commands through the command registry.
+The current tests cover inline parsing, RESP request parsing, strings, TTL, lists, hashes, sets, keyspace commands, and AOF replay through the command registry.
 
 ## Roadmap
 
 Potential next phases:
 
-- Append-only file persistence
 - Snapshot persistence
 - Pub/Sub
 - Authentication

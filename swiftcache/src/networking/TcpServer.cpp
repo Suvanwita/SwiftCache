@@ -101,10 +101,15 @@ std::string formatRespResponse(const std::string& response) {
     return out.str();
 }
 
+bool isSuccessfulResponse(const std::string& response) {
+    return response.rfind("ERR ", 0) != 0;
+}
+
 } // namespace
 
-TcpServer::TcpServer(std::uint16_t port, DataStore& store, const CommandRegistry& registry, ServerMetrics& metrics)
-    : port_(port), store_(store), registry_(registry), metrics_(metrics) {}
+TcpServer::TcpServer(std::uint16_t port, DataStore& store, const CommandRegistry& registry,
+                     ServerMetrics& metrics, AofPersistence* aof)
+    : port_(port), store_(store), registry_(registry), metrics_(metrics), aof_(aof) {}
 
 bool TcpServer::start() {
     serverFd_ = socket(AF_INET, SOCK_STREAM, 0);
@@ -202,6 +207,12 @@ void TcpServer::handleClient(int clientFd) const {
             if (!command.tokens.empty()) {
                 metrics_.commandExecuted();
                 const auto result = registry_.execute(command.tokens, store_);
+                if (aof_ != nullptr && isSuccessfulResponse(result.response) &&
+                    aof_->isMutatingCommand(command.tokens)) {
+                    if (!aof_->append(command.tokens)) {
+                        std::cerr << "failed to append command to AOF\n";
+                    }
+                }
                 const auto response = command.protocol == RequestProtocol::Resp
                     ? formatRespResponse(result.response)
                     : result.response;
