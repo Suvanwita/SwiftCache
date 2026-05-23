@@ -13,6 +13,8 @@ set(SWIFTCACHE_SOURCES
     src/core/CommandRegistry.cpp
     src/core/ExpiryWorker.cpp
     src/core/ServerMetrics.cpp
+    src/core/SnapshotPersistence.cpp
+    src/core/SnapshotWorker.cpp
     src/datastore/DataStore.cpp
     src/parser/CommandParser.cpp
     src/utils/StringUtils.cpp
@@ -62,6 +64,7 @@ target_link_libraries(swiftcache_core PUBLIC Threads::Threads)
 add_executable(SwiftCache src/main.cpp)
 target_link_libraries(SwiftCache PRIVATE swiftcache_core)
 target_compile_definitions(SwiftCache PRIVATE SWIFTCACHE_AOF_PATH="${CMAKE_SOURCE_DIR}/storage/swiftcache.aof")
+target_compile_definitions(SwiftCache PRIVATE SWIFTCACHE_SNAPSHOT_PATH="${CMAKE_SOURCE_DIR}/storage/swiftcache.snapshot")
 
 add_executable(swiftcache_tests tests/CommandTests.cpp)
 target_link_libraries(swiftcache_tests PRIVATE swiftcache_core)

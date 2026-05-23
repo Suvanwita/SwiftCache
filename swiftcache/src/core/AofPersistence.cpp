@@ -73,6 +73,52 @@ bool AofPersistence::append(const std::vector<std::string>& tokens) {
     return output.good();
 }
 
+CommandResult AofPersistence::executeAndAppend(const std::vector<std::string>& tokens,
+                                               const std::function<CommandResult()>& execute,
+                                               bool& appendSucceeded) {
+    appendSucceeded = true;
+    if (!isMutatingCommand(tokens)) {
+        return execute();
+    }
+
+    std::lock_guard<std::mutex> lock(mutex_);
+    const auto result = execute();
+    if (result.response.rfind("ERR ", 0) == 0) {
+        return result;
+    }
+
+    const auto parent = std::filesystem::path(path_).parent_path();
+    if (!parent.empty()) {
+        std::filesystem::create_directories(parent);
+    }
+
+    std::ofstream output(path_, std::ios::binary | std::ios::app);
+    if (!output.is_open()) {
+        appendSucceeded = false;
+        return result;
+    }
+
+    output << encodeRespCommand(tokens);
+    output.flush();
+    appendSucceeded = output.good();
+    return result;
+}
+
+bool AofPersistence::checkpoint(const std::function<bool()>& saveSnapshot) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!saveSnapshot()) {
+        return false;
+    }
+
+    const auto parent = std::filesystem::path(path_).parent_path();
+    if (!parent.empty()) {
+        std::filesystem::create_directories(parent);
+    }
+
+    std::ofstream output(path_, std::ios::binary | std::ios::trunc);
+    return output.good();
+}
+
 bool AofPersistence::isMutatingCommand(const std::vector<std::string>& tokens) const {
     if (tokens.empty()) {
         return false;

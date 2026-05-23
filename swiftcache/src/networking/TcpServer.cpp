@@ -206,12 +206,14 @@ void TcpServer::handleClient(int clientFd) const {
 
             if (!command.tokens.empty()) {
                 metrics_.commandExecuted();
-                const auto result = registry_.execute(command.tokens, store_);
-                if (aof_ != nullptr && isSuccessfulResponse(result.response) &&
-                    aof_->isMutatingCommand(command.tokens)) {
-                    if (!aof_->append(command.tokens)) {
-                        std::cerr << "failed to append command to AOF\n";
-                    }
+                bool appendSucceeded = true;
+                const auto result = aof_ == nullptr
+                    ? registry_.execute(command.tokens, store_)
+                    : aof_->executeAndAppend(command.tokens, [this, &command]() {
+                        return registry_.execute(command.tokens, store_);
+                    }, appendSucceeded);
+                if (!appendSucceeded && isSuccessfulResponse(result.response)) {
+                    std::cerr << "failed to append command to AOF\n";
                 }
                 const auto response = command.protocol == RequestProtocol::Resp
                     ? formatRespResponse(result.response)

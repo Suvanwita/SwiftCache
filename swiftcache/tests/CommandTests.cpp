@@ -7,6 +7,7 @@
 
 #include "../src/commands/CommandFactory.h"
 #include "../src/core/AofPersistence.h"
+#include "../src/core/SnapshotPersistence.h"
 #include "../src/datastore/DataStore.h"
 #include "../src/parser/CommandParser.h"
 
@@ -149,6 +150,37 @@ int main() {
     assert(run(registry, replayedStore, {"HGET", "persisted:hash", "field"}).response == "value\n");
     assert(std::stoll(run(registry, replayedStore, {"TTL", "persisted:string"}).response) > 0);
     std::filesystem::remove(aofPath);
+
+    const std::string snapshotPath = "/tmp/swiftcache-command-tests.snapshot";
+    const std::string checkpointAofPath = "/tmp/swiftcache-command-tests-checkpoint.aof";
+    std::filesystem::remove(snapshotPath);
+    std::filesystem::remove(checkpointAofPath);
+
+    swiftcache::DataStore snapshotStore;
+    assert(run(registry, snapshotStore, {"SET", "snap:string", "value"}).response == "OK\n");
+    assert(run(registry, snapshotStore, {"RPUSH", "snap:list", "a", "b"}).response == "2\n");
+    assert(run(registry, snapshotStore, {"HSET", "snap:hash", "field", "value"}).response == "1\n");
+    assert(run(registry, snapshotStore, {"SADD", "snap:set", "one", "two"}).response == "2\n");
+
+    swiftcache::SnapshotPersistence snapshot(snapshotPath);
+    assert(snapshot.save(snapshotStore));
+
+    swiftcache::DataStore loadedSnapshotStore;
+    assert(snapshot.load(loadedSnapshotStore));
+    assert(run(registry, loadedSnapshotStore, {"GET", "snap:string"}).response == "value\n");
+    assert(run(registry, loadedSnapshotStore, {"LRANGE", "snap:list", "0", "-1"}).response == "a\nb\n");
+    assert(run(registry, loadedSnapshotStore, {"HGET", "snap:hash", "field"}).response == "value\n");
+    assert(run(registry, loadedSnapshotStore, {"SMEMBERS", "snap:set"}).response == "one\ntwo\n");
+
+    swiftcache::AofPersistence checkpointAof(checkpointAofPath);
+    assert(checkpointAof.append({"SET", "delta", "value"}));
+    assert(std::filesystem::file_size(checkpointAofPath) > 0);
+    assert(checkpointAof.checkpoint([&snapshot, &snapshotStore]() {
+        return snapshot.save(snapshotStore);
+    }));
+    assert(std::filesystem::file_size(checkpointAofPath) == 0);
+    std::filesystem::remove(snapshotPath);
+    std::filesystem::remove(checkpointAofPath);
 
     return 0;
 }

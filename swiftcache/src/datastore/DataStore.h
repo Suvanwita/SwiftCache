@@ -63,6 +63,11 @@ struct SetMembersResult {
     std::vector<std::string> members;
 };
 
+struct SnapshotEntry {
+    std::string key;
+    ValueObject value;
+};
+
 class DataStore {
 public:
     void set(const std::string& key, const std::string& value, long long ttlSeconds = -1);
@@ -97,6 +102,8 @@ public:
     std::string type(const std::string& key);
     bool rename(const std::string& source, const std::string& destination);
     void flushdb();
+    std::vector<SnapshotEntry> snapshot();
+    void loadSnapshot(const std::vector<SnapshotEntry>& entries);
     std::size_t removeExpired();
     StoreStats stats() const;
 

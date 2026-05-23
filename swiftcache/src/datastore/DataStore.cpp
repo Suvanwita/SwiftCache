@@ -744,6 +744,41 @@ void DataStore::flushdb() {
     values_.clear();
 }
 
+std::vector<SnapshotEntry> DataStore::snapshot() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const long long now = nowMillis();
+    std::vector<SnapshotEntry> entries;
+
+    for (auto it = values_.begin(); it != values_.end();) {
+        if (isExpired(it->second, now)) {
+            it = values_.erase(it);
+            continue;
+        }
+
+        entries.push_back(SnapshotEntry{it->first, it->second});
+        ++it;
+    }
+
+    std::sort(entries.begin(), entries.end(), [](const auto& lhs, const auto& rhs) {
+        return lhs.key < rhs.key;
+    });
+
+    return entries;
+}
+
+void DataStore::loadSnapshot(const std::vector<SnapshotEntry>& entries) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const long long now = nowMillis();
+    values_.clear();
+
+    for (const auto& entry : entries) {
+        if (isExpired(entry.value, now)) {
+            continue;
+        }
+        values_[entry.key] = entry.value;
+    }
+}
+
 std::size_t DataStore::removeExpired() {
     std::lock_guard<std::mutex> lock(mutex_);
     const long long now = nowMillis();
