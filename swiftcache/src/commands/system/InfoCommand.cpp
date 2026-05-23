@@ -19,6 +19,7 @@ CommandResult InfoCommand::execute(const std::vector<std::string>& args, DataSto
 
     const auto uptime = std::chrono::duration_cast<std::chrono::seconds>(
         std::chrono::steady_clock::now() - startedAt_);
+    store.removeExpired();
     const auto stats = store.stats();
 
     std::ostringstream out;

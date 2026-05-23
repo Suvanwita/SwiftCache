@@ -8,7 +8,7 @@ test: build
 	ctest --test-dir build --output-on-failure
 
 run: build
-	./build/MiniRedis
+	./build/SwiftCache
 
 clean:
 	rm -rf build

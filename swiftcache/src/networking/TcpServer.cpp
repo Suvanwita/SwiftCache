@@ -93,7 +93,7 @@ void TcpServer::acceptLoop() {
 
 void TcpServer::handleClient(int clientFd) const {
     metrics_.clientConnected();
-    sendResponse(clientFd, "Connected to MiniRedis\n");
+    sendResponse(clientFd, "Connected to SwiftCache\n");
 
     std::string pending;
     char buffer[kBufferSize];
