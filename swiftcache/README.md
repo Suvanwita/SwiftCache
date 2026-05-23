@@ -2,13 +2,15 @@
 
 SwiftCache is a Redis-inspired in-memory datastore written in C++17. 
 
-The current implementation supports strings, lists, hashes, sets, TTL, automatic expiration, basic server metrics, and multiple threaded TCP clients on `localhost:6379`.
+The current implementation supports strings, lists, hashes, sets, TTL, automatic expiration, basic server metrics, inline text commands, RESP requests, and multiple threaded TCP clients on `localhost:6379`.
 
 
 ## Features
 
 - C++17 implementation
 - TCP socket server on `localhost:6379`
+- Inline text protocol for manual `telnet`/`nc` usage
+- RESP array/bulk-string request parsing for Redis-style clients
 - Multiple threaded client connections
 - Graceful client disconnect handling
 - Command registry pattern with one command per file
@@ -52,7 +54,7 @@ swiftcache/
 - `commands/` contains domain-specific command implementations grouped by data type.
 - `datastore/` owns typed in-memory storage and synchronization.
 - `parser/` converts client input into command tokens.
-- `networking/` owns socket setup, accept loop, and per-client handling.
+- `networking/` owns socket setup, accept loop, per-client handling, and protocol-aware response formatting.
 - `storage/` is reserved for future persistence work.
 
 The datastore uses `ValueObject` with typed payloads for strings, lists, hashes, and sets. All datastore operations are protected by a mutex, and expiration is enforced both lazily during access and actively by the expiry worker.
@@ -96,7 +98,7 @@ Run tests:
 make -C swiftcache test
 ```
 
-## Connecting
+## Connecting And Protocols
 
 SwiftCache listens on `localhost:6379`.
 
@@ -104,7 +106,7 @@ SwiftCache listens on `localhost:6379`.
 telnet localhost 6379
 ```
 
-Expected greeting:
+Inline clients receive a greeting before the first inline command response:
 
 ```text
 Connected to SwiftCache
@@ -117,6 +119,26 @@ COMMAND arg1 arg2
 ```
 
 Current parser support is intentionally simple. Values with spaces are not yet supported.
+
+SwiftCache also accepts RESP array/bulk-string requests, the request format used by Redis clients:
+
+```text
+*3
+$3
+SET
+$4
+name
+$10
+swiftcache
+```
+
+RESP clients receive RESP-formatted replies:
+
+```text
++OK
+```
+
+For RESP requests, SwiftCache does not send the inline greeting, so clients can parse the first server reply as a protocol response.
 
 ## Command Reference
 
@@ -384,13 +406,12 @@ For new data types, extend `ValueObject` and add typed operations to `DataStore`
 make -C swiftcache test
 ```
 
-The current tests cover strings, TTL, lists, hashes, and sets through the command registry.
+The current tests cover inline parsing, RESP request parsing, strings, TTL, lists, hashes, sets, and keyspace commands through the command registry.
 
 ## Roadmap
 
 Potential next phases:
 
-- RESP protocol support
 - Append-only file persistence
 - Snapshot persistence
 - Pub/Sub

@@ -2,15 +2,18 @@
 
 #include <arpa/inet.h>
 #include <cerrno>
+#include <cctype>
 #include <cstring>
 #include <iostream>
 #include <netinet/in.h>
+#include <sstream>
 #include <string>
 #include <sys/socket.h>
+#include <sys/select.h>
 #include <thread>
 #include <unistd.h>
 
-#include "../utils/StringUtils.h"
+#include "../parser/CommandParser.h"
 
 namespace swiftcache {
 namespace {
@@ -22,6 +25,80 @@ void closeIfOpen(int fd) {
     if (fd >= 0) {
         close(fd);
     }
+}
+
+std::string trimTrailingNewline(std::string value) {
+    while (!value.empty() && (value.back() == '\n' || value.back() == '\r')) {
+        value.pop_back();
+    }
+    return value;
+}
+
+bool isIntegerLine(const std::string& value) {
+    if (value.empty()) {
+        return false;
+    }
+    std::size_t index = value[0] == '-' ? 1 : 0;
+    if (index == value.size()) {
+        return false;
+    }
+    for (; index < value.size(); ++index) {
+        if (!std::isdigit(static_cast<unsigned char>(value[index]))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+std::string bulkString(const std::string& value) {
+    return "$" + std::to_string(value.size()) + "\r\n" + value + "\r\n";
+}
+
+std::string formatRespResponse(const std::string& response) {
+    const std::string trimmed = trimTrailingNewline(response);
+
+    if (trimmed.rfind("ERR ", 0) == 0) {
+        return "-" + trimmed + "\r\n";
+    }
+    if (trimmed == "OK" || trimmed == "PONG") {
+        return "+" + trimmed + "\r\n";
+    }
+    if (trimmed == "(nil)") {
+        return "$-1\r\n";
+    }
+    if (isIntegerLine(trimmed)) {
+        return ":" + trimmed + "\r\n";
+    }
+    if (!trimmed.empty() && trimmed.front() == '{') {
+        return bulkString(trimmed);
+    }
+
+    std::vector<std::string> lines;
+    std::istringstream input(trimmed);
+    std::string line;
+    while (std::getline(input, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        lines.push_back(line);
+    }
+
+    if (lines.size() <= 1) {
+        return bulkString(trimmed);
+    }
+
+    std::ostringstream out;
+    out << "*" << lines.size() << "\r\n";
+    for (const auto& item : lines) {
+        if (item == "(nil)") {
+            out << "$-1\r\n";
+        } else if (isIntegerLine(item)) {
+            out << ":" << item << "\r\n";
+        } else {
+            out << bulkString(item);
+        }
+    }
+    return out.str();
 }
 
 } // namespace
@@ -93,7 +170,7 @@ void TcpServer::acceptLoop() {
 
 void TcpServer::handleClient(int clientFd) const {
     metrics_.clientConnected();
-    sendResponse(clientFd, "Connected to SwiftCache\n");
+    bool greetingSent = false;
 
     std::string pending;
     char buffer[kBufferSize];
@@ -111,23 +188,29 @@ void TcpServer::handleClient(int clientFd) const {
         }
 
         pending.append(buffer, static_cast<std::size_t>(bytesRead));
-        std::size_t newline = pending.find('\n');
-        while (newline != std::string::npos) {
-            const std::string line = trimLineEnding(pending.substr(0, newline + 1));
-            pending.erase(0, newline + 1);
+        const auto commands = parser_.parseAvailable(pending);
+        for (const auto& command : commands) {
+            if (!greetingSent && command.protocol == RequestProtocol::Inline) {
+                if (!sendResponse(clientFd, "Connected to SwiftCache\n")) {
+                    closeIfOpen(clientFd);
+                    metrics_.clientDisconnected();
+                    return;
+                }
+                greetingSent = true;
+            }
 
-            if (!line.empty()) {
-                const auto tokens = parser_.parse(line);
+            if (!command.tokens.empty()) {
                 metrics_.commandExecuted();
-                const auto result = registry_.execute(tokens, store_);
-                if (!sendResponse(clientFd, result.response) || result.closeConnection) {
+                const auto result = registry_.execute(command.tokens, store_);
+                const auto response = command.protocol == RequestProtocol::Resp
+                    ? formatRespResponse(result.response)
+                    : result.response;
+                if (!sendResponse(clientFd, response) || result.closeConnection) {
                     closeIfOpen(clientFd);
                     metrics_.clientDisconnected();
                     return;
                 }
             }
-
-            newline = pending.find('\n');
         }
     }
 

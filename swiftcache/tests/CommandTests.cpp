@@ -6,6 +6,7 @@
 
 #include "../src/commands/CommandFactory.h"
 #include "../src/datastore/DataStore.h"
+#include "../src/parser/CommandParser.h"
 
 namespace {
 
@@ -21,6 +22,26 @@ int main() {
     swiftcache::DataStore store;
     swiftcache::ServerMetrics metrics;
     auto registry = swiftcache::buildCommandRegistry(std::chrono::steady_clock::now(), metrics);
+    swiftcache::CommandParser parser;
+
+    std::string inlineBuffer = "SET protocol inline\nGET protocol\n";
+    const auto inlineCommands = parser.parseAvailable(inlineBuffer);
+    assert(inlineCommands.size() == 2);
+    assert(inlineCommands[0].protocol == swiftcache::RequestProtocol::Inline);
+    assert((inlineCommands[0].tokens == std::vector<std::string>{"SET", "protocol", "inline"}));
+    assert(inlineBuffer.empty());
+
+    std::string respBuffer = "*3\r\n$3\r\nSET\r\n$8\r\nprotocol\r\n$4\r\nresp\r\n";
+    const auto respCommands = parser.parseAvailable(respBuffer);
+    assert(respCommands.size() == 1);
+    assert(respCommands[0].protocol == swiftcache::RequestProtocol::Resp);
+    assert((respCommands[0].tokens == std::vector<std::string>{"SET", "protocol", "resp"}));
+    assert(respBuffer.empty());
+
+    std::string partialRespBuffer = "*2\r\n$4\r\nPING\r\n";
+    const auto partialRespCommands = parser.parseAvailable(partialRespBuffer);
+    assert(partialRespCommands.empty());
+    assert(partialRespBuffer == "*2\r\n$4\r\nPING\r\n");
 
     assert(run(registry, store, {"SET", "session:1", "active"}).response == "OK\n");
     assert(run(registry, store, {"GET", "session:1"}).response == "active\n");
