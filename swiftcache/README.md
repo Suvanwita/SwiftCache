@@ -1,6 +1,6 @@
 # SwiftCache
 
-SwiftCache is a Redis-inspired C++17 datastore starter architecture. It now supports core string, list, hash, TTL, and expiration operations while keeping the modular backend shape ready for persistence, Pub/Sub, richer data types, eviction, replication, and clustering.
+SwiftCache is a Redis-inspired C++17 datastore starter architecture. It now supports core string, list, hash, set, TTL, and expiration operations while keeping the modular backend shape ready for persistence, Pub/Sub, richer data types, eviction, replication, and clustering.
 
 This is intentionally a systems/backend project, not a CRUD application.
 
@@ -33,6 +33,11 @@ This is intentionally a systems/backend project, not a CRUD application.
 - `HDEL key field`
 - `HEXISTS key field`
 - `HGETALL key`
+- `SADD key member [member ...]`
+- `SREM key member [member ...]`
+- `SISMEMBER key member`
+- `SMEMBERS key`
+- `SCARD key`
 - `INFO`
 
 ---
@@ -42,7 +47,7 @@ This is intentionally a systems/backend project, not a CRUD application.
 - `core/` owns command abstractions and registry dispatch.
 - `commands/` contains isolated command implementations grouped by domain.
 - `core/ExpiryWorker` removes expired keys in the background every second.
-- `datastore/` owns the thread-safe in-memory key/value store, typed string/list/hash values, and lazy expiration checks.
+- `datastore/` owns the thread-safe in-memory key/value store, typed string/list/hash/set values, and lazy expiration checks.
 - `parser/` converts client input into command tokens.
 - `networking/` owns the TCP socket server and threaded client handling.
 - `storage/` is reserved for future persistence work.
@@ -130,6 +135,20 @@ role
 architect
 HDEL user:1 role
 1
+SADD tags fast cache fast
+2
+SADD tags systems
+1
+SCARD tags
+3
+SISMEMBER tags cache
+1
+SMEMBERS tags
+cache
+fast
+systems
+SREM tags fast
+1
 SET token abc EX 60
 OK
 TTL token
@@ -150,9 +169,9 @@ GET name
 (nil)
 INFO
 {
- totalKeys: 5,
+ totalKeys: 6,
  connectedClients: 1,
- totalCommands: 29,
+ totalCommands: 35,
  uptimeSeconds: 12
 }
 ```

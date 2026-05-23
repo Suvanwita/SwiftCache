@@ -83,5 +83,15 @@ int main() {
     assert(run(registry, store, {"HDEL", "user:1", "role"}).response == "0\n");
     assert(run(registry, store, {"HSET", "word", "field", "value"}).response == "ERR wrong type for HSET\n");
 
+    assert(run(registry, store, {"SADD", "tags", "fast", "cache", "fast"}).response == "2\n");
+    assert(run(registry, store, {"SADD", "tags", "systems"}).response == "1\n");
+    assert(run(registry, store, {"SCARD", "tags"}).response == "3\n");
+    assert(run(registry, store, {"SISMEMBER", "tags", "cache"}).response == "1\n");
+    assert(run(registry, store, {"SISMEMBER", "tags", "missing"}).response == "0\n");
+    assert(run(registry, store, {"SMEMBERS", "tags"}).response == "cache\nfast\nsystems\n");
+    assert(run(registry, store, {"SREM", "tags", "fast", "missing"}).response == "1\n");
+    assert(run(registry, store, {"SMEMBERS", "tags"}).response == "cache\nsystems\n");
+    assert(run(registry, store, {"SADD", "word", "nope"}).response == "ERR wrong type for SADD\n");
+
     return 0;
 }

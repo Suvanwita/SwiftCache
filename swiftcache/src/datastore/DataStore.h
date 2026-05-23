@@ -5,6 +5,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -14,12 +15,14 @@ namespace data_type {
 constexpr const char* String = "string";
 constexpr const char* List = "list";
 constexpr const char* Hash = "hash";
+constexpr const char* Set = "set";
 } // namespace data_type
 
 struct ValueObject {
     std::string value;
     std::deque<std::string> list;
     std::unordered_map<std::string, std::string> hash;
+    std::unordered_set<std::string> set;
     std::string type;
     long long createdAt;
     long long expiresAt;
@@ -55,6 +58,11 @@ struct HashGetAllResult {
     std::vector<std::pair<std::string, std::string>> fields;
 };
 
+struct SetMembersResult {
+    DataStoreStatus status{DataStoreStatus::Missing};
+    std::vector<std::string> members;
+};
+
 class DataStore {
 public:
     void set(const std::string& key, const std::string& value, long long ttlSeconds = -1);
@@ -80,6 +88,11 @@ public:
     std::optional<std::size_t> hdel(const std::string& key, const std::string& field);
     std::optional<bool> hexists(const std::string& key, const std::string& field);
     HashGetAllResult hgetall(const std::string& key);
+    std::optional<std::size_t> sadd(const std::string& key, const std::vector<std::string>& members);
+    std::optional<std::size_t> srem(const std::string& key, const std::vector<std::string>& members);
+    std::optional<bool> sismember(const std::string& key, const std::string& member);
+    SetMembersResult smembers(const std::string& key);
+    std::optional<std::size_t> scard(const std::string& key);
     std::size_t removeExpired();
     StoreStats stats() const;
 

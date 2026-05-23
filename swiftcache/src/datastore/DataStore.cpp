@@ -53,7 +53,7 @@ void DataStore::set(const std::string& key, const std::string& value, long long 
     std::lock_guard<std::mutex> lock(mutex_);
     const long long createdAt = nowMillis();
     const long long expiresAt = ttlSeconds >= 0 ? createdAt + (ttlSeconds * 1000) : -1;
-    values_[key] = ValueObject{value, {}, {}, data_type::String, createdAt, expiresAt};
+    values_[key] = ValueObject{value, {}, {}, {}, data_type::String, createdAt, expiresAt};
 }
 
 std::optional<std::string> DataStore::get(const std::string& key) {
@@ -177,7 +177,7 @@ std::optional<long long> DataStore::incrBy(const std::string& key, long long del
 
     const long long updated = current + delta;
     const long long createdAt = it == values_.end() ? now : it->second.createdAt;
-    values_[key] = ValueObject{std::to_string(updated), {}, {}, data_type::String, createdAt, expiresAt};
+    values_[key] = ValueObject{std::to_string(updated), {}, {}, {}, data_type::String, createdAt, expiresAt};
     return updated;
 }
 
@@ -192,7 +192,7 @@ std::optional<std::size_t> DataStore::append(const std::string& key, const std::
     }
 
     if (it == values_.end()) {
-        values_[key] = ValueObject{suffix, {}, {}, data_type::String, now, -1};
+        values_[key] = ValueObject{suffix, {}, {}, {}, data_type::String, now, -1};
         return suffix.size();
     }
 
@@ -254,7 +254,7 @@ void DataStore::mset(const std::vector<std::pair<std::string, std::string>>& ent
     const long long now = nowMillis();
 
     for (const auto& entry : entries) {
-        values_[entry.first] = ValueObject{entry.second, {}, {}, data_type::String, now, -1};
+        values_[entry.first] = ValueObject{entry.second, {}, {}, {}, data_type::String, now, -1};
     }
 }
 
@@ -270,7 +270,7 @@ std::optional<std::size_t> DataStore::lpush(const std::string& key,
     }
 
     if (it == values_.end()) {
-        ValueObject object{"", {}, {}, data_type::List, now, -1};
+        ValueObject object{"", {}, {}, {}, data_type::List, now, -1};
         for (const auto& value : values) {
             object.list.push_front(value);
         }
@@ -301,7 +301,7 @@ std::optional<std::size_t> DataStore::rpush(const std::string& key,
     }
 
     if (it == values_.end()) {
-        ValueObject object{"", {}, {}, data_type::List, now, -1};
+        ValueObject object{"", {}, {}, {}, data_type::List, now, -1};
         for (const auto& value : values) {
             object.list.push_back(value);
         }
@@ -421,7 +421,7 @@ std::optional<std::size_t> DataStore::hset(const std::string& key, const std::st
     }
 
     if (it == values_.end()) {
-        ValueObject object{"", {}, {}, data_type::Hash, now, -1};
+        ValueObject object{"", {}, {}, {}, data_type::Hash, now, -1};
         object.hash[field] = value;
         values_[key] = std::move(object);
         return 1;
@@ -534,6 +534,129 @@ HashGetAllResult DataStore::hgetall(const std::string& key) {
     });
 
     return {DataStoreStatus::Ok, fields};
+}
+
+std::optional<std::size_t> DataStore::sadd(const std::string& key,
+                                           const std::vector<std::string>& members) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const long long now = nowMillis();
+    auto it = values_.find(key);
+
+    if (it != values_.end() && isExpired(it->second, now)) {
+        values_.erase(it);
+        it = values_.end();
+    }
+
+    if (it == values_.end()) {
+        ValueObject object{"", {}, {}, {}, data_type::Set, now, -1};
+        std::size_t added = 0;
+        for (const auto& member : members) {
+            added += object.set.insert(member).second ? 1 : 0;
+        }
+        values_[key] = std::move(object);
+        return added;
+    }
+
+    if (it->second.type != data_type::Set) {
+        return std::nullopt;
+    }
+
+    std::size_t added = 0;
+    for (const auto& member : members) {
+        added += it->second.set.insert(member).second ? 1 : 0;
+    }
+    return added;
+}
+
+std::optional<std::size_t> DataStore::srem(const std::string& key,
+                                           const std::vector<std::string>& members) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const long long now = nowMillis();
+    const auto it = values_.find(key);
+    if (it == values_.end()) {
+        return 0;
+    }
+
+    if (isExpired(it->second, now)) {
+        values_.erase(it);
+        return 0;
+    }
+
+    if (it->second.type != data_type::Set) {
+        return std::nullopt;
+    }
+
+    std::size_t removed = 0;
+    for (const auto& member : members) {
+        removed += it->second.set.erase(member);
+    }
+    if (it->second.set.empty()) {
+        values_.erase(it);
+    }
+
+    return removed;
+}
+
+std::optional<bool> DataStore::sismember(const std::string& key, const std::string& member) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const long long now = nowMillis();
+    const auto it = values_.find(key);
+    if (it == values_.end()) {
+        return false;
+    }
+
+    if (isExpired(it->second, now)) {
+        values_.erase(it);
+        return false;
+    }
+
+    if (it->second.type != data_type::Set) {
+        return std::nullopt;
+    }
+
+    return it->second.set.find(member) != it->second.set.end();
+}
+
+SetMembersResult DataStore::smembers(const std::string& key) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const long long now = nowMillis();
+    const auto it = values_.find(key);
+    if (it == values_.end()) {
+        return {DataStoreStatus::Missing, {}};
+    }
+
+    if (isExpired(it->second, now)) {
+        values_.erase(it);
+        return {DataStoreStatus::Missing, {}};
+    }
+
+    if (it->second.type != data_type::Set) {
+        return {DataStoreStatus::WrongType, {}};
+    }
+
+    std::vector<std::string> members(it->second.set.begin(), it->second.set.end());
+    std::sort(members.begin(), members.end());
+    return {DataStoreStatus::Ok, members};
+}
+
+std::optional<std::size_t> DataStore::scard(const std::string& key) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const long long now = nowMillis();
+    const auto it = values_.find(key);
+    if (it == values_.end()) {
+        return 0;
+    }
+
+    if (isExpired(it->second, now)) {
+        values_.erase(it);
+        return 0;
+    }
+
+    if (it->second.type != data_type::Set) {
+        return std::nullopt;
+    }
+
+    return it->second.set.size();
 }
 
 std::size_t DataStore::removeExpired() {

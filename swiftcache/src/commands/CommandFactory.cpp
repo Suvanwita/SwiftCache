@@ -10,6 +10,11 @@
 #include "list/LrangeCommand.h"
 #include "list/RpopCommand.h"
 #include "list/RpushCommand.h"
+#include "set/SaddCommand.h"
+#include "set/ScardCommand.h"
+#include "set/SismemberCommand.h"
+#include "set/SmembersCommand.h"
+#include "set/SremCommand.h"
 #include "string/AppendCommand.h"
 #include "string/DecrCommand.h"
 #include "string/DelCommand.h"
@@ -55,6 +60,11 @@ CommandRegistry buildCommandRegistry(std::chrono::steady_clock::time_point start
     registry.registerCommand(std::make_unique<HdelCommand>());
     registry.registerCommand(std::make_unique<HexistsCommand>());
     registry.registerCommand(std::make_unique<HgetallCommand>());
+    registry.registerCommand(std::make_unique<SaddCommand>());
+    registry.registerCommand(std::make_unique<SremCommand>());
+    registry.registerCommand(std::make_unique<SismemberCommand>());
+    registry.registerCommand(std::make_unique<SmembersCommand>());
+    registry.registerCommand(std::make_unique<ScardCommand>());
     registry.registerCommand(std::make_unique<InfoCommand>(startedAt, metrics));
     return registry;
 }

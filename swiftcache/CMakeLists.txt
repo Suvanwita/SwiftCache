@@ -27,6 +27,11 @@ set(SWIFTCACHE_SOURCES
     src/commands/list/LrangeCommand.cpp
     src/commands/list/RpopCommand.cpp
     src/commands/list/RpushCommand.cpp
+    src/commands/set/SaddCommand.cpp
+    src/commands/set/ScardCommand.cpp
+    src/commands/set/SismemberCommand.cpp
+    src/commands/set/SmembersCommand.cpp
+    src/commands/set/SremCommand.cpp
     src/commands/string/AppendCommand.cpp
     src/commands/string/DecrCommand.cpp
     src/commands/string/SetCommand.cpp
