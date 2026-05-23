@@ -1,78 +1,100 @@
 # SwiftCache
 
-SwiftCache is a Redis-inspired C++17 datastore starter architecture. It now supports core string, list, hash, set, TTL, and expiration operations while keeping the modular backend shape ready for persistence, Pub/Sub, richer data types, eviction, replication, and clustering.
+SwiftCache is a Redis-inspired in-memory datastore written in C++17. 
 
-This is intentionally a systems/backend project, not a CRUD application.
+The current implementation supports strings, lists, hashes, sets, TTL, automatic expiration, basic server metrics, and multiple threaded TCP clients on `localhost:6379`.
 
----
 
-## Commands
+## Features
 
-- `PING`
-- `SET key value`
-- `SET key value EX seconds`
-- `GET key`
-- `DEL key`
-- `EXISTS key`
-- `EXPIRE key seconds`
-- `TTL key`
-- `PERSIST key`
-- `INCR key`
-- `DECR key`
-- `APPEND key value`
-- `STRLEN key`
-- `MGET key [key ...]`
-- `MSET key value [key value ...]`
-- `LPUSH key value [value ...]`
-- `RPUSH key value [value ...]`
-- `LPOP key`
-- `RPOP key`
-- `LRANGE key start stop`
-- `HSET key field value`
-- `HGET key field`
-- `HDEL key field`
-- `HEXISTS key field`
-- `HGETALL key`
-- `SADD key member [member ...]`
-- `SREM key member [member ...]`
-- `SISMEMBER key member`
-- `SMEMBERS key`
-- `SCARD key`
-- `INFO`
+- C++17 implementation
+- TCP socket server on `localhost:6379`
+- Multiple threaded client connections
+- Graceful client disconnect handling
+- Command registry pattern with one command per file
+- Thread-safe in-memory datastore
+- Typed values: string, list, hash, and set
+- TTL support with lazy expiration on access
+- Background expiry worker running once per second
+- Server metrics through `INFO`
+- CMake and Makefile build support
+- Unit tests for core command behavior
 
----
+## Project Structure
+
+```text
+swiftcache/
+├── src/
+│   ├── main.cpp
+│   ├── core/
+│   ├── networking/
+│   ├── parser/
+│   ├── commands/
+│   │   ├── hash/
+│   │   ├── list/
+│   │   ├── set/
+│   │   ├── string/
+│   │   └── system/
+│   ├── datastore/
+│   └── utils/
+├── tests/
+├── storage/
+├── CMakeLists.txt
+├── Makefile
+└── README.md
+```
 
 ## Architecture
 
-- `core/` owns command abstractions and registry dispatch.
-- `commands/` contains isolated command implementations grouped by domain.
-- `core/ExpiryWorker` removes expired keys in the background every second.
-- `datastore/` owns the thread-safe in-memory key/value store, typed string/list/hash/set values, and lazy expiration checks.
+- `core/` defines command abstractions, the command registry, server metrics, and expiry worker.
+- `commands/` contains domain-specific command implementations grouped by data type.
+- `datastore/` owns typed in-memory storage and synchronization.
 - `parser/` converts client input into command tokens.
-- `networking/` owns the TCP socket server and threaded client handling.
+- `networking/` owns socket setup, accept loop, and per-client handling.
 - `storage/` is reserved for future persistence work.
 
----
+The datastore uses `ValueObject` with typed payloads for strings, lists, hashes, and sets. All datastore operations are protected by a mutex, and expiration is enforced both lazily during access and actively by the expiry worker.
 
-## Build
+## Requirements
+
+- C++17 compiler
+- CMake 3.10 or newer
+- Make
+- Linux/macOS-style socket environment
+- `telnet`, `nc`, or any TCP client for manual testing
+
+## Installation And Setup
+
+Clone or open the repository, then build from the `swiftcache` directory:
 
 ```sh
-mkdir build
+cd swiftcache
+mkdir -p build
 cd build
 cmake ..
 make
+```
+
+Run the server:
+
+```sh
 ./SwiftCache
 ```
 
-Or from the repository root:
+Or use the Makefile from the repository root:
 
 ```sh
+make -C swiftcache build
 make -C swiftcache run
 ```
 
----
+Run tests:
 
-## Try it
+```sh
+make -C swiftcache test
+```
+
+## Connecting
 
 SwiftCache listens on `localhost:6379`.
 
@@ -86,27 +108,171 @@ Expected greeting:
 Connected to SwiftCache
 ```
 
-Example session:
+Commands are line-oriented and space-delimited:
+
+```text
+COMMAND arg1 arg2
+```
+
+Current parser support is intentionally simple. Values with spaces are not yet supported.
+
+## Command Reference
+
+### Server Commands
+
+| Command | Description |
+| --- | --- |
+| `PING` | Returns `PONG`. |
+| `INFO` | Returns server and datastore metrics. |
+
+### Key Commands
+
+| Command | Description |
+| --- | --- |
+| `DEL key` | Deletes a key. Returns `1` if removed, otherwise `0`. |
+| `EXISTS key` | Returns `1` if the key exists and is not expired, otherwise `0`. |
+
+### TTL Commands
+
+| Command | Description |
+| --- | --- |
+| `SET key value EX seconds` | Sets a string key with TTL. |
+| `EXPIRE key seconds` | Adds or replaces TTL for an existing key. |
+| `TTL key` | Returns remaining TTL, `-1` for no TTL, or `-2` for missing keys. |
+| `PERSIST key` | Removes TTL from a key. |
+
+### String Commands
+
+| Command | Description |
+| --- | --- |
+| `SET key value` | Sets a string value. |
+| `GET key` | Gets a string value or `(nil)`. |
+| `INCR key` | Increments an integer string by one. |
+| `DECR key` | Decrements an integer string by one. |
+| `APPEND key value` | Appends to a string and returns the new length. |
+| `STRLEN key` | Returns string length, or `0` for missing keys. |
+| `MGET key [key ...]` | Gets multiple string values. |
+| `MSET key value [key value ...]` | Sets multiple string values. |
+
+### List Commands
+
+| Command | Description |
+| --- | --- |
+| `LPUSH key value [value ...]` | Pushes one or more values to the left side of a list. |
+| `RPUSH key value [value ...]` | Pushes one or more values to the right side of a list. |
+| `LPOP key` | Pops from the left side of a list. |
+| `RPOP key` | Pops from the right side of a list. |
+| `LRANGE key start stop` | Returns an inclusive list range. Negative indexes are supported. |
+
+### Hash Commands
+
+| Command | Description |
+| --- | --- |
+| `HSET key field value` | Sets a field in a hash. Returns `1` for new field, `0` for update. |
+| `HGET key field` | Gets a field value or `(nil)`. |
+| `HDEL key field` | Deletes a field. Returns `1` if removed, otherwise `0`. |
+| `HEXISTS key field` | Returns `1` if the field exists, otherwise `0`. |
+| `HGETALL key` | Returns field/value pairs, one item per line. |
+
+### Set Commands
+
+| Command | Description |
+| --- | --- |
+| `SADD key member [member ...]` | Adds members to a set. Returns count of newly added members. |
+| `SREM key member [member ...]` | Removes members from a set. Returns count removed. |
+| `SISMEMBER key member` | Returns `1` if member exists, otherwise `0`. |
+| `SMEMBERS key` | Returns all set members, one per line. |
+| `SCARD key` | Returns set cardinality. |
+
+## Example Sessions
+
+### Server And Keys
 
 ```text
 PING
 PONG
+INFO
+{
+ totalKeys: 0,
+ connectedClients: 1,
+ totalCommands: 2,
+ uptimeSeconds: 4
+}
+```
+
+```text
 SET name swiftcache
 OK
+EXISTS name
+1
+DEL name
+1
+GET name
+(nil)
+```
+
+### Strings
+
+```text
+SET name swiftcache
+OK
+GET name
+swiftcache
 APPEND name -store
 16
 STRLEN name
 16
+```
+
+```text
 MSET visits 10 mode fast
 OK
 INCR visits
 11
 DECR visits
 10
-MGET name visits missing
-swiftcache-store
+MGET visits mode missing
 10
+fast
 (nil)
+```
+
+### TTL And Expiration
+
+```text
+SET token abc EX 5
+OK
+GET token
+abc
+TTL token
+5
+```
+
+After five seconds:
+
+```text
+GET token
+(nil)
+TTL token
+-2
+```
+
+```text
+SET session active
+OK
+EXPIRE session 120
+1
+TTL session
+120
+PERSIST session
+1
+TTL session
+-1
+```
+
+### Lists
+
+```text
 LPUSH queue b a
 2
 RPUSH queue c d
@@ -120,6 +286,14 @@ LPOP queue
 a
 RPOP queue
 d
+LRANGE queue 0 -1
+b
+c
+```
+
+### Hashes
+
+```text
 HSET user:1 name ada
 1
 HSET user:1 role architect
@@ -135,6 +309,11 @@ role
 architect
 HDEL user:1 role
 1
+```
+
+### Sets
+
+```text
 SADD tags fast cache fast
 2
 SADD tags systems
@@ -149,37 +328,48 @@ fast
 systems
 SREM tags fast
 1
-SET token abc EX 60
-OK
-TTL token
-60
-EXPIRE token 120
-1
-PERSIST token
-1
-TTL token
--1
-GET name
-swiftcache
-EXISTS name
-1
-DEL name
-1
-GET name
-(nil)
-INFO
-{
- totalKeys: 6,
- connectedClients: 1,
- totalCommands: 35,
- uptimeSeconds: 12
-}
+SMEMBERS tags
+cache
+systems
 ```
 
----
+## Error Behavior
+
+SwiftCache returns simple text errors:
+
+```text
+ERR unknown command 'COMMAND'
+ERR wrong number of arguments for SET
+ERR wrong type for SADD
+ERR value is not an integer
+```
+
+Missing values generally return `(nil)` for read commands and `0` for delete/remove/existence checks.
+
+## Development
+
+Add new commands by creating a command class under the relevant `src/commands/<domain>/` directory and registering it in `src/commands/CommandFactory.cpp`.
+
+For new data types, extend `ValueObject` and add typed operations to `DataStore`. Keep command classes thin: they should validate arguments, call the datastore, and format responses.
 
 ## Tests
 
 ```sh
 make -C swiftcache test
 ```
+
+The current tests cover strings, TTL, lists, hashes, and sets through the command registry.
+
+## Roadmap
+
+Potential next phases:
+
+- RESP protocol support
+- Append-only file persistence
+- Snapshot persistence
+- Pub/Sub
+- Authentication
+- LRU/LFU eviction
+- Replication starter
+- Thread pool or event-loop networking
+- Integration tests over TCP
