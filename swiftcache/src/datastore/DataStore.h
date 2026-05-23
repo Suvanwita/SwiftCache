@@ -4,6 +4,8 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <utility>
+#include <vector>
 
 namespace swiftcache {
 
@@ -27,11 +29,17 @@ public:
     bool expire(const std::string& key, long long ttlSeconds);
     long long ttl(const std::string& key);
     bool persist(const std::string& key);
+    std::optional<long long> incrBy(const std::string& key, long long delta);
+    std::size_t append(const std::string& key, const std::string& suffix);
+    std::optional<std::size_t> strlen(const std::string& key);
+    std::vector<std::optional<std::string>> mget(const std::vector<std::string>& keys);
+    void mset(const std::vector<std::pair<std::string, std::string>>& entries);
     std::size_t removeExpired();
     StoreStats stats() const;
 
 private:
     static long long nowMillis();
+    static bool parseInteger(const std::string& value, long long& parsed);
     bool isExpired(const ValueObject& object, long long now) const;
 
     mutable std::mutex mutex_;

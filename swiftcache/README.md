@@ -1,6 +1,6 @@
 # SwiftCache
 
-SwiftCache is a Redis-inspired C++17 datastore starter architecture. Phase 2 adds TTL and expiration while keeping the modular backend shape ready for persistence, Pub/Sub, richer data types, eviction, replication, and clustering.
+SwiftCache is a Redis-inspired C++17 datastore starter architecture. It now supports core string operations plus TTL and expiration while keeping the modular backend shape ready for persistence, Pub/Sub, richer data types, eviction, replication, and clustering.
 
 This is intentionally a systems/backend project, not a CRUD application.
 
@@ -17,6 +17,12 @@ This is intentionally a systems/backend project, not a CRUD application.
 - `EXPIRE key seconds`
 - `TTL key`
 - `PERSIST key`
+- `INCR key`
+- `DECR key`
+- `APPEND key value`
+- `STRLEN key`
+- `MGET key [key ...]`
+- `MSET key value [key value ...]`
 - `INFO`
 
 ---
@@ -72,6 +78,20 @@ PING
 PONG
 SET name swiftcache
 OK
+APPEND name -store
+16
+STRLEN name
+16
+MSET visits 10 mode fast
+OK
+INCR visits
+11
+DECR visits
+10
+MGET name visits missing
+swiftcache-store
+10
+(nil)
 SET token abc EX 60
 OK
 TTL token
@@ -92,9 +112,9 @@ GET name
 (nil)
 INFO
 {
- totalKeys: 1,
+ totalKeys: 4,
  connectedClients: 1,
- totalCommands: 12,
+ totalCommands: 20,
  uptimeSeconds: 12
 }
 ```

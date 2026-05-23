@@ -48,5 +48,18 @@ int main() {
     assert(run(registry, store, {"GET", "short"}).response == "(nil)\n");
     assert(run(registry, store, {"TTL", "short"}).response == "-2\n");
 
+    assert(run(registry, store, {"INCR", "counter"}).response == "1\n");
+    assert(run(registry, store, {"INCR", "counter"}).response == "2\n");
+    assert(run(registry, store, {"DECR", "counter"}).response == "1\n");
+    assert(run(registry, store, {"SET", "word", "swift"}).response == "OK\n");
+    assert(run(registry, store, {"APPEND", "word", "cache"}).response == "10\n");
+    assert(run(registry, store, {"GET", "word"}).response == "swiftcache\n");
+    assert(run(registry, store, {"STRLEN", "word"}).response == "10\n");
+    assert(run(registry, store, {"STRLEN", "missing"}).response == "0\n");
+    assert(run(registry, store, {"MSET", "a", "1", "b", "2", "c", "3"}).response == "OK\n");
+    assert(run(registry, store, {"MGET", "a", "missing", "c"}).response == "1\n(nil)\n3\n");
+    assert(run(registry, store, {"SET", "not-int", "abc"}).response == "OK\n");
+    assert(run(registry, store, {"INCR", "not-int"}).response == "ERR value is not an integer\n");
+
     return 0;
 }

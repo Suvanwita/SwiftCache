@@ -17,12 +17,18 @@ set(SWIFTCACHE_SOURCES
     src/utils/StringUtils.cpp
     src/networking/TcpServer.cpp
     src/commands/CommandFactory.cpp
+    src/commands/string/AppendCommand.cpp
+    src/commands/string/DecrCommand.cpp
     src/commands/string/SetCommand.cpp
     src/commands/string/GetCommand.cpp
     src/commands/string/DelCommand.cpp
     src/commands/string/ExpireCommand.cpp
     src/commands/string/ExistsCommand.cpp
+    src/commands/string/IncrCommand.cpp
+    src/commands/string/MgetCommand.cpp
+    src/commands/string/MsetCommand.cpp
     src/commands/string/PersistCommand.cpp
+    src/commands/string/StrlenCommand.cpp
     src/commands/string/TtlCommand.cpp
     src/commands/system/PingCommand.cpp
     src/commands/system/InfoCommand.cpp
