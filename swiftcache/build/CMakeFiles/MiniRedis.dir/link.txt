@@ -1,0 +1,1 @@
+/usr/bin/c++ CMakeFiles/MiniRedis.dir/src/main.cpp.o -o MiniRedis  libswiftcache_core.a 

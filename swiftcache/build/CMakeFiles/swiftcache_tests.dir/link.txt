@@ -1,0 +1,1 @@
+/usr/bin/c++ CMakeFiles/swiftcache_tests.dir/tests/CommandTests.cpp.o -o swiftcache_tests  libswiftcache_core.a 

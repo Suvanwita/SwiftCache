@@ -1,0 +1,6 @@
+/home/user/Desktop/SwiftCache/swiftcache/build/CMakeFiles/swiftcache_core.dir
+/home/user/Desktop/SwiftCache/swiftcache/build/CMakeFiles/MiniRedis.dir
+/home/user/Desktop/SwiftCache/swiftcache/build/CMakeFiles/swiftcache_tests.dir
+/home/user/Desktop/SwiftCache/swiftcache/build/CMakeFiles/test.dir
+/home/user/Desktop/SwiftCache/swiftcache/build/CMakeFiles/edit_cache.dir
+/home/user/Desktop/SwiftCache/swiftcache/build/CMakeFiles/rebuild_cache.dir
