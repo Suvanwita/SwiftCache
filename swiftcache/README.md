@@ -1,6 +1,6 @@
 # SwiftCache
 
-SwiftCache is a Redis-inspired C++17 datastore starter architecture. It now supports core string operations plus TTL and expiration while keeping the modular backend shape ready for persistence, Pub/Sub, richer data types, eviction, replication, and clustering.
+SwiftCache is a Redis-inspired C++17 datastore starter architecture. It now supports core string operations, list operations, TTL, and expiration while keeping the modular backend shape ready for persistence, Pub/Sub, richer data types, eviction, replication, and clustering.
 
 This is intentionally a systems/backend project, not a CRUD application.
 
@@ -23,6 +23,11 @@ This is intentionally a systems/backend project, not a CRUD application.
 - `STRLEN key`
 - `MGET key [key ...]`
 - `MSET key value [key value ...]`
+- `LPUSH key value [value ...]`
+- `RPUSH key value [value ...]`
+- `LPOP key`
+- `RPOP key`
+- `LRANGE key start stop`
 - `INFO`
 
 ---
@@ -32,7 +37,7 @@ This is intentionally a systems/backend project, not a CRUD application.
 - `core/` owns command abstractions and registry dispatch.
 - `commands/` contains isolated command implementations grouped by domain.
 - `core/ExpiryWorker` removes expired keys in the background every second.
-- `datastore/` owns the thread-safe in-memory key/value store and lazy expiration checks.
+- `datastore/` owns the thread-safe in-memory key/value store, typed string/list values, and lazy expiration checks.
 - `parser/` converts client input into command tokens.
 - `networking/` owns the TCP socket server and threaded client handling.
 - `storage/` is reserved for future persistence work.
@@ -92,6 +97,19 @@ MGET name visits missing
 swiftcache-store
 10
 (nil)
+LPUSH queue b a
+2
+RPUSH queue c d
+4
+LRANGE queue 0 -1
+a
+b
+c
+d
+LPOP queue
+a
+RPOP queue
+d
 SET token abc EX 60
 OK
 TTL token
@@ -114,7 +132,7 @@ INFO
 {
  totalKeys: 4,
  connectedClients: 1,
- totalCommands: 20,
+ totalCommands: 23,
  uptimeSeconds: 12
 }
 ```

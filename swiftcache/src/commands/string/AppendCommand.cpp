@@ -13,7 +13,12 @@ CommandResult AppendCommand::execute(const std::vector<std::string>& args, DataS
         return {"ERR wrong number of arguments for APPEND\n", false};
     }
 
-    return {std::to_string(store.append(args[0], args[1])) + "\n", false};
+    const auto length = store.append(args[0], args[1]);
+    if (!length.has_value()) {
+        return {"ERR wrong type for APPEND\n", false};
+    }
+
+    return {std::to_string(*length) + "\n", false};
 }
 
 } // namespace swiftcache

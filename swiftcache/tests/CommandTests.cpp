@@ -61,5 +61,15 @@ int main() {
     assert(run(registry, store, {"SET", "not-int", "abc"}).response == "OK\n");
     assert(run(registry, store, {"INCR", "not-int"}).response == "ERR value is not an integer\n");
 
+    assert(run(registry, store, {"LPUSH", "queue", "b", "a"}).response == "2\n");
+    assert(run(registry, store, {"RPUSH", "queue", "c", "d"}).response == "4\n");
+    assert(run(registry, store, {"LRANGE", "queue", "0", "-1"}).response == "a\nb\nc\nd\n");
+    assert(run(registry, store, {"LPOP", "queue"}).response == "a\n");
+    assert(run(registry, store, {"RPOP", "queue"}).response == "d\n");
+    assert(run(registry, store, {"LRANGE", "queue", "0", "-1"}).response == "b\nc\n");
+    assert(run(registry, store, {"LRANGE", "queue", "-2", "-1"}).response == "b\nc\n");
+    assert(run(registry, store, {"LPOP", "empty-list"}).response == "(nil)\n");
+    assert(run(registry, store, {"LPUSH", "word", "nope"}).response == "ERR wrong type for LPUSH\n");
+
     return 0;
 }

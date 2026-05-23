@@ -1,5 +1,6 @@
 #pragma once
 
+#include <deque>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -9,8 +10,14 @@
 
 namespace swiftcache {
 
+namespace data_type {
+constexpr const char* String = "string";
+constexpr const char* List = "list";
+} // namespace data_type
+
 struct ValueObject {
     std::string value;
+    std::deque<std::string> list;
     std::string type;
     long long createdAt;
     long long expiresAt;
@@ -18,6 +25,22 @@ struct ValueObject {
 
 struct StoreStats {
     std::size_t keys{0};
+};
+
+enum class DataStoreStatus {
+    Ok,
+    Missing,
+    WrongType
+};
+
+struct ListPopResult {
+    DataStoreStatus status{DataStoreStatus::Missing};
+    std::string value;
+};
+
+struct ListRangeResult {
+    DataStoreStatus status{DataStoreStatus::Missing};
+    std::vector<std::string> values;
 };
 
 class DataStore {
@@ -30,16 +53,23 @@ public:
     long long ttl(const std::string& key);
     bool persist(const std::string& key);
     std::optional<long long> incrBy(const std::string& key, long long delta);
-    std::size_t append(const std::string& key, const std::string& suffix);
+    std::optional<std::size_t> append(const std::string& key, const std::string& suffix);
     std::optional<std::size_t> strlen(const std::string& key);
     std::vector<std::optional<std::string>> mget(const std::vector<std::string>& keys);
     void mset(const std::vector<std::pair<std::string, std::string>>& entries);
+    std::optional<std::size_t> lpush(const std::string& key, const std::vector<std::string>& values);
+    std::optional<std::size_t> rpush(const std::string& key, const std::vector<std::string>& values);
+    ListPopResult lpop(const std::string& key);
+    ListPopResult rpop(const std::string& key);
+    ListRangeResult lrange(const std::string& key, long long start, long long stop);
     std::size_t removeExpired();
     StoreStats stats() const;
 
 private:
     static long long nowMillis();
     static bool parseInteger(const std::string& value, long long& parsed);
+    static std::pair<std::size_t, std::size_t> normalizeRange(long long start, long long stop,
+                                                              std::size_t size);
     bool isExpired(const ValueObject& object, long long now) const;
 
     mutable std::mutex mutex_;

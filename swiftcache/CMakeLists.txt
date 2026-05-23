@@ -17,6 +17,11 @@ set(SWIFTCACHE_SOURCES
     src/utils/StringUtils.cpp
     src/networking/TcpServer.cpp
     src/commands/CommandFactory.cpp
+    src/commands/list/LpopCommand.cpp
+    src/commands/list/LpushCommand.cpp
+    src/commands/list/LrangeCommand.cpp
+    src/commands/list/RpopCommand.cpp
+    src/commands/list/RpushCommand.cpp
     src/commands/string/AppendCommand.cpp
     src/commands/string/DecrCommand.cpp
     src/commands/string/SetCommand.cpp

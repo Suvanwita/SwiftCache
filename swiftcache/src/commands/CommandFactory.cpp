@@ -1,5 +1,10 @@
 #include "CommandFactory.h"
 
+#include "list/LpopCommand.h"
+#include "list/LpushCommand.h"
+#include "list/LrangeCommand.h"
+#include "list/RpopCommand.h"
+#include "list/RpushCommand.h"
 #include "string/AppendCommand.h"
 #include "string/DecrCommand.h"
 #include "string/DelCommand.h"
@@ -35,6 +40,11 @@ CommandRegistry buildCommandRegistry(std::chrono::steady_clock::time_point start
     registry.registerCommand(std::make_unique<StrlenCommand>());
     registry.registerCommand(std::make_unique<MgetCommand>());
     registry.registerCommand(std::make_unique<MsetCommand>());
+    registry.registerCommand(std::make_unique<LpushCommand>());
+    registry.registerCommand(std::make_unique<RpushCommand>());
+    registry.registerCommand(std::make_unique<LpopCommand>());
+    registry.registerCommand(std::make_unique<RpopCommand>());
+    registry.registerCommand(std::make_unique<LrangeCommand>());
     registry.registerCommand(std::make_unique<InfoCommand>(startedAt, metrics));
     return registry;
 }
