@@ -17,6 +17,11 @@ set(SWIFTCACHE_SOURCES
     src/utils/StringUtils.cpp
     src/networking/TcpServer.cpp
     src/commands/CommandFactory.cpp
+    src/commands/hash/HdelCommand.cpp
+    src/commands/hash/HexistsCommand.cpp
+    src/commands/hash/HgetCommand.cpp
+    src/commands/hash/HgetallCommand.cpp
+    src/commands/hash/HsetCommand.cpp
     src/commands/list/LpopCommand.cpp
     src/commands/list/LpushCommand.cpp
     src/commands/list/LrangeCommand.cpp

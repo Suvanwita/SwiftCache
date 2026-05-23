@@ -53,7 +53,7 @@ void DataStore::set(const std::string& key, const std::string& value, long long 
     std::lock_guard<std::mutex> lock(mutex_);
     const long long createdAt = nowMillis();
     const long long expiresAt = ttlSeconds >= 0 ? createdAt + (ttlSeconds * 1000) : -1;
-    values_[key] = ValueObject{value, {}, data_type::String, createdAt, expiresAt};
+    values_[key] = ValueObject{value, {}, {}, data_type::String, createdAt, expiresAt};
 }
 
 std::optional<std::string> DataStore::get(const std::string& key) {
@@ -177,7 +177,7 @@ std::optional<long long> DataStore::incrBy(const std::string& key, long long del
 
     const long long updated = current + delta;
     const long long createdAt = it == values_.end() ? now : it->second.createdAt;
-    values_[key] = ValueObject{std::to_string(updated), {}, data_type::String, createdAt, expiresAt};
+    values_[key] = ValueObject{std::to_string(updated), {}, {}, data_type::String, createdAt, expiresAt};
     return updated;
 }
 
@@ -192,7 +192,7 @@ std::optional<std::size_t> DataStore::append(const std::string& key, const std::
     }
 
     if (it == values_.end()) {
-        values_[key] = ValueObject{suffix, {}, data_type::String, now, -1};
+        values_[key] = ValueObject{suffix, {}, {}, data_type::String, now, -1};
         return suffix.size();
     }
 
@@ -254,7 +254,7 @@ void DataStore::mset(const std::vector<std::pair<std::string, std::string>>& ent
     const long long now = nowMillis();
 
     for (const auto& entry : entries) {
-        values_[entry.first] = ValueObject{entry.second, {}, data_type::String, now, -1};
+        values_[entry.first] = ValueObject{entry.second, {}, {}, data_type::String, now, -1};
     }
 }
 
@@ -270,7 +270,7 @@ std::optional<std::size_t> DataStore::lpush(const std::string& key,
     }
 
     if (it == values_.end()) {
-        ValueObject object{"", {}, data_type::List, now, -1};
+        ValueObject object{"", {}, {}, data_type::List, now, -1};
         for (const auto& value : values) {
             object.list.push_front(value);
         }
@@ -301,7 +301,7 @@ std::optional<std::size_t> DataStore::rpush(const std::string& key,
     }
 
     if (it == values_.end()) {
-        ValueObject object{"", {}, data_type::List, now, -1};
+        ValueObject object{"", {}, {}, data_type::List, now, -1};
         for (const auto& value : values) {
             object.list.push_back(value);
         }
@@ -407,6 +407,133 @@ ListRangeResult DataStore::lrange(const std::string& key, long long start, long 
     }
 
     return {DataStoreStatus::Ok, result};
+}
+
+std::optional<std::size_t> DataStore::hset(const std::string& key, const std::string& field,
+                                           const std::string& value) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const long long now = nowMillis();
+    auto it = values_.find(key);
+
+    if (it != values_.end() && isExpired(it->second, now)) {
+        values_.erase(it);
+        it = values_.end();
+    }
+
+    if (it == values_.end()) {
+        ValueObject object{"", {}, {}, data_type::Hash, now, -1};
+        object.hash[field] = value;
+        values_[key] = std::move(object);
+        return 1;
+    }
+
+    if (it->second.type != data_type::Hash) {
+        return std::nullopt;
+    }
+
+    const bool isNewField = it->second.hash.find(field) == it->second.hash.end();
+    it->second.hash[field] = value;
+    return isNewField ? 1 : 0;
+}
+
+HashGetResult DataStore::hget(const std::string& key, const std::string& field) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const long long now = nowMillis();
+    const auto it = values_.find(key);
+    if (it == values_.end()) {
+        return {DataStoreStatus::Missing, std::nullopt};
+    }
+
+    if (isExpired(it->second, now)) {
+        values_.erase(it);
+        return {DataStoreStatus::Missing, std::nullopt};
+    }
+
+    if (it->second.type != data_type::Hash) {
+        return {DataStoreStatus::WrongType, std::nullopt};
+    }
+
+    const auto fieldIt = it->second.hash.find(field);
+    if (fieldIt == it->second.hash.end()) {
+        return {DataStoreStatus::Missing, std::nullopt};
+    }
+
+    return {DataStoreStatus::Ok, fieldIt->second};
+}
+
+std::optional<std::size_t> DataStore::hdel(const std::string& key, const std::string& field) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const long long now = nowMillis();
+    const auto it = values_.find(key);
+    if (it == values_.end()) {
+        return 0;
+    }
+
+    if (isExpired(it->second, now)) {
+        values_.erase(it);
+        return 0;
+    }
+
+    if (it->second.type != data_type::Hash) {
+        return std::nullopt;
+    }
+
+    const std::size_t removed = it->second.hash.erase(field);
+    if (it->second.hash.empty()) {
+        values_.erase(it);
+    }
+
+    return removed;
+}
+
+std::optional<bool> DataStore::hexists(const std::string& key, const std::string& field) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const long long now = nowMillis();
+    const auto it = values_.find(key);
+    if (it == values_.end()) {
+        return false;
+    }
+
+    if (isExpired(it->second, now)) {
+        values_.erase(it);
+        return false;
+    }
+
+    if (it->second.type != data_type::Hash) {
+        return std::nullopt;
+    }
+
+    return it->second.hash.find(field) != it->second.hash.end();
+}
+
+HashGetAllResult DataStore::hgetall(const std::string& key) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const long long now = nowMillis();
+    const auto it = values_.find(key);
+    if (it == values_.end()) {
+        return {DataStoreStatus::Missing, {}};
+    }
+
+    if (isExpired(it->second, now)) {
+        values_.erase(it);
+        return {DataStoreStatus::Missing, {}};
+    }
+
+    if (it->second.type != data_type::Hash) {
+        return {DataStoreStatus::WrongType, {}};
+    }
+
+    std::vector<std::pair<std::string, std::string>> fields;
+    fields.reserve(it->second.hash.size());
+    for (const auto& entry : it->second.hash) {
+        fields.push_back(entry);
+    }
+
+    std::sort(fields.begin(), fields.end(), [](const auto& lhs, const auto& rhs) {
+        return lhs.first < rhs.first;
+    });
+
+    return {DataStoreStatus::Ok, fields};
 }
 
 std::size_t DataStore::removeExpired() {

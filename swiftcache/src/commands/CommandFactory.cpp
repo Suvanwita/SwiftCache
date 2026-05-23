@@ -1,5 +1,10 @@
 #include "CommandFactory.h"
 
+#include "hash/HdelCommand.h"
+#include "hash/HexistsCommand.h"
+#include "hash/HgetCommand.h"
+#include "hash/HgetallCommand.h"
+#include "hash/HsetCommand.h"
 #include "list/LpopCommand.h"
 #include "list/LpushCommand.h"
 #include "list/LrangeCommand.h"
@@ -45,6 +50,11 @@ CommandRegistry buildCommandRegistry(std::chrono::steady_clock::time_point start
     registry.registerCommand(std::make_unique<LpopCommand>());
     registry.registerCommand(std::make_unique<RpopCommand>());
     registry.registerCommand(std::make_unique<LrangeCommand>());
+    registry.registerCommand(std::make_unique<HsetCommand>());
+    registry.registerCommand(std::make_unique<HgetCommand>());
+    registry.registerCommand(std::make_unique<HdelCommand>());
+    registry.registerCommand(std::make_unique<HexistsCommand>());
+    registry.registerCommand(std::make_unique<HgetallCommand>());
     registry.registerCommand(std::make_unique<InfoCommand>(startedAt, metrics));
     return registry;
 }

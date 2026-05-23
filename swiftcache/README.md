@@ -1,6 +1,6 @@
 # SwiftCache
 
-SwiftCache is a Redis-inspired C++17 datastore starter architecture. It now supports core string operations, list operations, TTL, and expiration while keeping the modular backend shape ready for persistence, Pub/Sub, richer data types, eviction, replication, and clustering.
+SwiftCache is a Redis-inspired C++17 datastore starter architecture. It now supports core string, list, hash, TTL, and expiration operations while keeping the modular backend shape ready for persistence, Pub/Sub, richer data types, eviction, replication, and clustering.
 
 This is intentionally a systems/backend project, not a CRUD application.
 
@@ -28,6 +28,11 @@ This is intentionally a systems/backend project, not a CRUD application.
 - `LPOP key`
 - `RPOP key`
 - `LRANGE key start stop`
+- `HSET key field value`
+- `HGET key field`
+- `HDEL key field`
+- `HEXISTS key field`
+- `HGETALL key`
 - `INFO`
 
 ---
@@ -37,7 +42,7 @@ This is intentionally a systems/backend project, not a CRUD application.
 - `core/` owns command abstractions and registry dispatch.
 - `commands/` contains isolated command implementations grouped by domain.
 - `core/ExpiryWorker` removes expired keys in the background every second.
-- `datastore/` owns the thread-safe in-memory key/value store, typed string/list values, and lazy expiration checks.
+- `datastore/` owns the thread-safe in-memory key/value store, typed string/list/hash values, and lazy expiration checks.
 - `parser/` converts client input into command tokens.
 - `networking/` owns the TCP socket server and threaded client handling.
 - `storage/` is reserved for future persistence work.
@@ -110,6 +115,21 @@ LPOP queue
 a
 RPOP queue
 d
+HSET user:1 name ada
+1
+HSET user:1 role architect
+1
+HGET user:1 name
+ada
+HEXISTS user:1 role
+1
+HGETALL user:1
+name
+ada
+role
+architect
+HDEL user:1 role
+1
 SET token abc EX 60
 OK
 TTL token
@@ -130,9 +150,9 @@ GET name
 (nil)
 INFO
 {
- totalKeys: 4,
+ totalKeys: 5,
  connectedClients: 1,
- totalCommands: 23,
+ totalCommands: 29,
  uptimeSeconds: 12
 }
 ```

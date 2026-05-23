@@ -71,5 +71,17 @@ int main() {
     assert(run(registry, store, {"LPOP", "empty-list"}).response == "(nil)\n");
     assert(run(registry, store, {"LPUSH", "word", "nope"}).response == "ERR wrong type for LPUSH\n");
 
+    assert(run(registry, store, {"HSET", "user:1", "name", "ada"}).response == "1\n");
+    assert(run(registry, store, {"HSET", "user:1", "role", "engineer"}).response == "1\n");
+    assert(run(registry, store, {"HSET", "user:1", "role", "architect"}).response == "0\n");
+    assert(run(registry, store, {"HGET", "user:1", "name"}).response == "ada\n");
+    assert(run(registry, store, {"HGET", "user:1", "missing"}).response == "(nil)\n");
+    assert(run(registry, store, {"HEXISTS", "user:1", "role"}).response == "1\n");
+    assert(run(registry, store, {"HEXISTS", "user:1", "missing"}).response == "0\n");
+    assert(run(registry, store, {"HGETALL", "user:1"}).response == "name\nada\nrole\narchitect\n");
+    assert(run(registry, store, {"HDEL", "user:1", "role"}).response == "1\n");
+    assert(run(registry, store, {"HDEL", "user:1", "role"}).response == "0\n");
+    assert(run(registry, store, {"HSET", "word", "field", "value"}).response == "ERR wrong type for HSET\n");
+
     return 0;
 }

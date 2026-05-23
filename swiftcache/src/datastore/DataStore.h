@@ -13,11 +13,13 @@ namespace swiftcache {
 namespace data_type {
 constexpr const char* String = "string";
 constexpr const char* List = "list";
+constexpr const char* Hash = "hash";
 } // namespace data_type
 
 struct ValueObject {
     std::string value;
     std::deque<std::string> list;
+    std::unordered_map<std::string, std::string> hash;
     std::string type;
     long long createdAt;
     long long expiresAt;
@@ -43,6 +45,16 @@ struct ListRangeResult {
     std::vector<std::string> values;
 };
 
+struct HashGetResult {
+    DataStoreStatus status{DataStoreStatus::Missing};
+    std::optional<std::string> value;
+};
+
+struct HashGetAllResult {
+    DataStoreStatus status{DataStoreStatus::Missing};
+    std::vector<std::pair<std::string, std::string>> fields;
+};
+
 class DataStore {
 public:
     void set(const std::string& key, const std::string& value, long long ttlSeconds = -1);
@@ -62,6 +74,12 @@ public:
     ListPopResult lpop(const std::string& key);
     ListPopResult rpop(const std::string& key);
     ListRangeResult lrange(const std::string& key, long long start, long long stop);
+    std::optional<std::size_t> hset(const std::string& key, const std::string& field,
+                                    const std::string& value);
+    HashGetResult hget(const std::string& key, const std::string& field);
+    std::optional<std::size_t> hdel(const std::string& key, const std::string& field);
+    std::optional<bool> hexists(const std::string& key, const std::string& field);
+    HashGetAllResult hgetall(const std::string& key);
     std::size_t removeExpired();
     StoreStats stats() const;
 
