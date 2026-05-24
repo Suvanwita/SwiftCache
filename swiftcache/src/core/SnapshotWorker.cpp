@@ -5,7 +5,7 @@
 namespace swiftcache {
 
 SnapshotWorker::SnapshotWorker(DataStore& store, SnapshotPersistence& snapshot,
-                               AofPersistence& aof, std::chrono::seconds interval)
+                               AofPersistence* aof, std::chrono::seconds interval)
     : store_(store), snapshot_(snapshot), aof_(aof), interval_(interval) {}
 
 SnapshotWorker::~SnapshotWorker() {
@@ -40,9 +40,11 @@ void SnapshotWorker::run() {
         }
         lock.unlock();
 
-        const bool saved = aof_.checkpoint([this]() {
-            return snapshot_.save(store_);
-        });
+        const bool saved = aof_ == nullptr
+            ? snapshot_.save(store_)
+            : aof_->checkpoint([this]() {
+                return snapshot_.save(store_);
+            });
         if (!saved) {
             std::cerr << "failed to write SwiftCache snapshot\n";
         }

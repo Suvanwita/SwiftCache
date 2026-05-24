@@ -136,11 +136,25 @@ std::string formatPubSubMessage(RequestProtocol protocol, const std::string& cha
     return "message\n" + channel + "\n" + message + "\n";
 }
 
+bool resolveHost(const std::string& host, in_addr& address) {
+    if (host == "localhost") {
+        address.s_addr = htonl(INADDR_LOOPBACK);
+        return true;
+    }
+    if (host == "*") {
+        address.s_addr = htonl(INADDR_ANY);
+        return true;
+    }
+    return inet_pton(AF_INET, host.c_str(), &address) == 1;
+}
+
 } // namespace
 
-TcpServer::TcpServer(std::uint16_t port, DataStore& store, const CommandRegistry& registry,
-                     ServerMetrics& metrics, AofPersistence* aof)
-    : port_(port), store_(store), registry_(registry), metrics_(metrics), aof_(aof) {}
+TcpServer::TcpServer(std::string host, std::uint16_t port, DataStore& store,
+                     const CommandRegistry& registry, ServerMetrics& metrics,
+                     AofPersistence* aof)
+    : host_(std::move(host)), port_(port), store_(store), registry_(registry), metrics_(metrics),
+      aof_(aof) {}
 
 bool TcpServer::start() {
     serverFd_ = socket(AF_INET, SOCK_STREAM, 0);
@@ -159,7 +173,12 @@ bool TcpServer::start() {
 
     sockaddr_in address{};
     address.sin_family = AF_INET;
-    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    if (!resolveHost(host_, address.sin_addr)) {
+        std::cerr << "invalid host: " << host_ << "\n";
+        closeIfOpen(serverFd_);
+        serverFd_ = -1;
+        return false;
+    }
     address.sin_port = htons(port_);
 
     if (bind(serverFd_, reinterpret_cast<sockaddr*>(&address), sizeof(address)) < 0) {
@@ -177,7 +196,7 @@ bool TcpServer::start() {
     }
 
     running_ = true;
-    std::cout << "SwiftCache listening on localhost:" << port_ << "\n";
+    std::cout << "SwiftCache listening on " << host_ << ":" << port_ << "\n";
     acceptLoop();
     return true;
 }

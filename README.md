@@ -2,13 +2,14 @@
 
 SwiftCache is a Redis-inspired in-memory datastore written in C++17. 
 
-The current implementation supports strings, lists, hashes, sets, TTL, automatic expiration, snapshot persistence, append-only file persistence, basic server metrics, Pub/Sub messaging, inline text commands, RESP requests, and multiple threaded TCP clients on `localhost:6379`.
+The current implementation supports strings, lists, hashes, sets, TTL, automatic expiration, snapshot persistence, append-only file persistence, basic server metrics, Pub/Sub messaging, inline text commands, RESP requests, and multiple threaded TCP clients on a configurable TCP host/port.
 
 
 ## Features
 
 - C++17 implementation
 - TCP socket server on `localhost:6379`
+- Configurable bind host, port, persistence paths, and persistence modes
 - Inline text protocol for manual `telnet`/`nc` usage
 - RESP array/bulk-string request parsing for Redis-style clients
 - Multiple threaded client connections
@@ -90,6 +91,18 @@ Run the server:
 ./SwiftCache
 ```
 
+Run with custom server and persistence settings:
+
+```sh
+./SwiftCache --host 0.0.0.0 --port 6380 --aof storage/dev.aof --snapshot storage/dev.snapshot
+```
+
+Disable persistence modes when you want a purely in-memory development server:
+
+```sh
+./SwiftCache --no-aof --no-snapshot
+```
+
 Or use the Makefile from the repository root:
 
 ```sh
@@ -103,9 +116,51 @@ Run tests:
 make -C swiftcache test
 ```
 
+## Configuration
+
+SwiftCache can be configured with CLI arguments, a config file, or both. When both are used, the config file is loaded first and CLI arguments override it.
+
+### CLI Options
+
+| Option | Description |
+| --- | --- |
+| `--host <host>` | Bind host. Defaults to `localhost`. Use `0.0.0.0` or `*` to listen on all IPv4 interfaces. |
+| `--port <port>` | Bind port. Defaults to `6379`. |
+| `--aof <path>` | Append-only file path. Defaults to `storage/swiftcache.aof`. |
+| `--snapshot <path>` | Snapshot file path. Defaults to `storage/swiftcache.snapshot`. |
+| `--config <path>` | Loads a key/value config file before applying CLI overrides. |
+| `--no-aof` | Disables AOF startup replay and command appends. |
+| `--no-snapshot` | Disables snapshot startup restore and background snapshot saves. |
+| `--help` | Prints available options. |
+
+### Config File
+
+Config files use `key=value` lines. Blank lines and `#` comments are ignored.
+
+```text
+host=localhost
+port=6379
+aof=storage/swiftcache.aof
+snapshot=storage/swiftcache.snapshot
+aof_enabled=true
+snapshot_enabled=true
+```
+
+Run with a config file:
+
+```sh
+./SwiftCache --config swiftcache.conf
+```
+
+Override one value from the config file:
+
+```sh
+./SwiftCache --config swiftcache.conf --port 6380
+```
+
 ## Connecting And Protocols
 
-SwiftCache listens on `localhost:6379`.
+SwiftCache listens on `localhost:6379` by default.
 
 ```sh
 telnet localhost 6379

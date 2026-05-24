@@ -18,8 +18,9 @@ namespace swiftcache {
 
 class TcpServer {
 public:
-    TcpServer(std::uint16_t port, DataStore& store, const CommandRegistry& registry,
-              ServerMetrics& metrics, AofPersistence* aof = nullptr);
+    TcpServer(std::string host, std::uint16_t port, DataStore& store,
+              const CommandRegistry& registry, ServerMetrics& metrics,
+              AofPersistence* aof = nullptr);
 
     bool start();
     void stop();
@@ -38,6 +39,7 @@ private:
                         const std::string& message) const;
     void removeClientSubscriptions(int clientFd) const;
 
+    std::string host_;
     std::uint16_t port_;
     DataStore& store_;
     const CommandRegistry& registry_;
