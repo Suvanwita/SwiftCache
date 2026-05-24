@@ -12,8 +12,10 @@
 #include <sys/select.h>
 #include <thread>
 #include <unistd.h>
+#include <utility>
 
 #include "../parser/CommandParser.h"
+#include "../utils/StringUtils.h"
 
 namespace swiftcache {
 namespace {
@@ -52,6 +54,15 @@ bool isIntegerLine(const std::string& value) {
 
 std::string bulkString(const std::string& value) {
     return "$" + std::to_string(value.size()) + "\r\n" + value + "\r\n";
+}
+
+std::string formatRespArray(const std::vector<std::string>& values) {
+    std::ostringstream out;
+    out << "*" << values.size() << "\r\n";
+    for (const auto& value : values) {
+        out << bulkString(value);
+    }
+    return out.str();
 }
 
 std::string formatRespResponse(const std::string& response) {
@@ -103,6 +114,26 @@ std::string formatRespResponse(const std::string& response) {
 
 bool isSuccessfulResponse(const std::string& response) {
     return response.rfind("ERR ", 0) != 0;
+}
+
+std::string formatPubSubTuple(RequestProtocol protocol, const std::string& kind,
+                              const std::string& channel, std::size_t count) {
+    if (protocol == RequestProtocol::Resp) {
+        std::ostringstream out;
+        out << "*3\r\n" << bulkString(kind) << bulkString(channel) << ":" << count << "\r\n";
+        return out.str();
+    }
+
+    return kind + "\n" + channel + "\n" + std::to_string(count) + "\n";
+}
+
+std::string formatPubSubMessage(RequestProtocol protocol, const std::string& channel,
+                                const std::string& message) {
+    if (protocol == RequestProtocol::Resp) {
+        return formatRespArray({"message", channel, message});
+    }
+
+    return "message\n" + channel + "\n" + message + "\n";
 }
 
 } // namespace
@@ -197,6 +228,7 @@ void TcpServer::handleClient(int clientFd) const {
         for (const auto& command : commands) {
             if (!greetingSent && command.protocol == RequestProtocol::Inline) {
                 if (!sendResponse(clientFd, "Connected to SwiftCache\n")) {
+                    removeClientSubscriptions(clientFd);
                     closeIfOpen(clientFd);
                     metrics_.clientDisconnected();
                     return;
@@ -206,6 +238,10 @@ void TcpServer::handleClient(int clientFd) const {
 
             if (!command.tokens.empty()) {
                 metrics_.commandExecuted();
+                if (handlePubSubCommand(clientFd, command, command.tokens)) {
+                    continue;
+                }
+
                 bool appendSucceeded = true;
                 const auto result = aof_ == nullptr
                     ? registry_.execute(command.tokens, store_)
@@ -219,6 +255,7 @@ void TcpServer::handleClient(int clientFd) const {
                     ? formatRespResponse(result.response)
                     : result.response;
                 if (!sendResponse(clientFd, response) || result.closeConnection) {
+                    removeClientSubscriptions(clientFd);
                     closeIfOpen(clientFd);
                     metrics_.clientDisconnected();
                     return;
@@ -227,11 +264,13 @@ void TcpServer::handleClient(int clientFd) const {
         }
     }
 
+    removeClientSubscriptions(clientFd);
     closeIfOpen(clientFd);
     metrics_.clientDisconnected();
 }
 
 bool TcpServer::sendResponse(int clientFd, const std::string& response) const {
+    std::lock_guard<std::mutex> lock(sendMutex_);
     const char* data = response.data();
     std::size_t remaining = response.size();
 
@@ -248,6 +287,147 @@ bool TcpServer::sendResponse(int clientFd, const std::string& response) const {
     }
 
     return true;
+}
+
+bool TcpServer::handlePubSubCommand(int clientFd, const ParsedCommand& command,
+                                    const std::vector<std::string>& tokens) const {
+    const auto commandName = toUpper(tokens.front());
+    std::string response;
+
+    if (commandName == "SUBSCRIBE") {
+        if (tokens.size() < 2) {
+            response = "ERR wrong number of arguments for SUBSCRIBE\n";
+        } else {
+            response = subscribe(clientFd, command.protocol,
+                                 std::vector<std::string>(tokens.begin() + 1, tokens.end()));
+        }
+    } else if (commandName == "UNSUBSCRIBE") {
+        response = unsubscribe(clientFd, command.protocol,
+                               std::vector<std::string>(tokens.begin() + 1, tokens.end()));
+    } else if (commandName == "PUBLISH") {
+        if (tokens.size() != 3) {
+            response = "ERR wrong number of arguments for PUBLISH\n";
+        } else {
+            response = publish(command.protocol, tokens[1], tokens[2]);
+        }
+    } else {
+        return false;
+    }
+
+    if (command.protocol == RequestProtocol::Resp && response.rfind("ERR ", 0) == 0) {
+        response = formatRespResponse(response);
+    }
+    sendResponse(clientFd, response);
+    return true;
+}
+
+std::string TcpServer::subscribe(int clientFd, RequestProtocol protocol,
+                                 const std::vector<std::string>& channels) const {
+    std::ostringstream response;
+
+    std::lock_guard<std::mutex> lock(pubsubMutex_);
+    auto& subscriptions = clientSubscriptions_[clientFd];
+    for (const auto& channel : channels) {
+        subscriptions.insert(channel);
+        channelSubscribers_[channel][clientFd] = protocol;
+
+        const auto item = formatPubSubTuple(protocol, "subscribe", channel, subscriptions.size());
+        response << item;
+    }
+
+    return response.str();
+}
+
+std::string TcpServer::unsubscribe(int clientFd, RequestProtocol protocol,
+                                   const std::vector<std::string>& channels) const {
+    std::ostringstream response;
+    std::vector<std::string> targets = channels;
+
+    std::lock_guard<std::mutex> lock(pubsubMutex_);
+    auto subscriptionsIt = clientSubscriptions_.find(clientFd);
+    if (targets.empty() && subscriptionsIt != clientSubscriptions_.end()) {
+        targets.assign(subscriptionsIt->second.begin(), subscriptionsIt->second.end());
+    }
+
+    for (const auto& channel : targets) {
+        if (subscriptionsIt != clientSubscriptions_.end()) {
+            subscriptionsIt->second.erase(channel);
+            if (subscriptionsIt->second.empty()) {
+                clientSubscriptions_.erase(subscriptionsIt);
+                subscriptionsIt = clientSubscriptions_.end();
+            }
+        }
+
+        auto subscribersIt = channelSubscribers_.find(channel);
+        if (subscribersIt != channelSubscribers_.end()) {
+            subscribersIt->second.erase(clientFd);
+            if (subscribersIt->second.empty()) {
+                channelSubscribers_.erase(subscribersIt);
+            }
+        }
+
+        const auto count = subscriptionsIt == clientSubscriptions_.end()
+            ? 0
+            : subscriptionsIt->second.size();
+        response << formatPubSubTuple(protocol, "unsubscribe", channel, count);
+    }
+
+    return response.str();
+}
+
+std::string TcpServer::publish(RequestProtocol protocol, const std::string& channel,
+                               const std::string& message) const {
+    std::vector<std::pair<int, RequestProtocol>> subscribers;
+
+    {
+        std::lock_guard<std::mutex> lock(pubsubMutex_);
+        const auto subscribersIt = channelSubscribers_.find(channel);
+        if (subscribersIt != channelSubscribers_.end()) {
+            subscribers.reserve(subscribersIt->second.size());
+            for (const auto& [clientFd, subscriberProtocol] : subscribersIt->second) {
+                subscribers.emplace_back(clientFd, subscriberProtocol);
+            }
+        }
+    }
+
+    std::vector<int> failedClients;
+    for (const auto& [clientFd, subscriberProtocol] : subscribers) {
+        if (!sendResponse(clientFd, formatPubSubMessage(subscriberProtocol, channel, message))) {
+            failedClients.push_back(clientFd);
+        }
+    }
+
+    for (const auto clientFd : failedClients) {
+        removeClientSubscriptions(clientFd);
+    }
+
+    const auto delivered = subscribers.size() - failedClients.size();
+    if (protocol == RequestProtocol::Resp) {
+        return ":" + std::to_string(delivered) + "\r\n";
+    }
+    return std::to_string(delivered) + "\n";
+}
+
+void TcpServer::removeClientSubscriptions(int clientFd) const {
+    std::lock_guard<std::mutex> lock(pubsubMutex_);
+    const auto subscriptionsIt = clientSubscriptions_.find(clientFd);
+    if (subscriptionsIt == clientSubscriptions_.end()) {
+        return;
+    }
+
+    for (const auto& channel : subscriptionsIt->second) {
+        auto subscribersIt = channelSubscribers_.find(channel);
+        if (subscribersIt == channelSubscribers_.end()) {
+            continue;
+        }
+
+        subscribersIt->second.erase(clientFd);
+        if (subscribersIt->second.empty()) {
+            channelSubscribers_.erase(subscribersIt);
+        }
+    }
+
+    clientSubscriptions_.erase(subscriptionsIt);
 }
 
 } // namespace swiftcache

@@ -2,7 +2,7 @@
 
 SwiftCache is a Redis-inspired in-memory datastore written in C++17. 
 
-The current implementation supports strings, lists, hashes, sets, TTL, automatic expiration, snapshot persistence, append-only file persistence, basic server metrics, inline text commands, RESP requests, and multiple threaded TCP clients on `localhost:6379`.
+The current implementation supports strings, lists, hashes, sets, TTL, automatic expiration, snapshot persistence, append-only file persistence, basic server metrics, Pub/Sub messaging, inline text commands, RESP requests, and multiple threaded TCP clients on `localhost:6379`.
 
 
 ## Features
@@ -20,6 +20,7 @@ The current implementation supports strings, lists, hashes, sets, TTL, automatic
 - Background expiry worker running once per second
 - Periodic snapshot persistence with startup restore
 - Append-only file persistence with startup replay
+- Pub/Sub messaging with `SUBSCRIBE`, `PUBLISH`, and `UNSUBSCRIBE`
 - Keyspace inspection with `KEYS`, `TYPE`, `SCAN`, `RENAME`, and `FLUSHDB`
 - Server metrics through `INFO`
 - CMake and Makefile build support
@@ -123,6 +124,7 @@ COMMAND arg1 arg2
 ```
 
 Current parser support is intentionally simple. Values with spaces are not yet supported.
+For Pub/Sub messages that contain spaces, use a RESP client so the message can be sent as one bulk string.
 
 SwiftCache also accepts RESP array/bulk-string requests, the request format used by Redis clients:
 
@@ -210,6 +212,16 @@ Snapshot files are written through a temporary file and atomically renamed into 
 | --- | --- |
 | `PING` | Returns `PONG`. |
 | `INFO` | Returns server and datastore metrics. |
+
+### Pub/Sub Commands
+
+Pub/Sub subscriptions are connection-local and are not persisted to snapshots or the AOF.
+
+| Command | Description |
+| --- | --- |
+| `SUBSCRIBE channel [channel ...]` | Subscribes the current client connection to one or more channels. |
+| `PUBLISH channel message` | Sends a message to all clients subscribed to the channel. Returns the number of clients that received it. |
+| `UNSUBSCRIBE [channel ...]` | Removes the current client connection from one or more channels. With no channel, removes all subscriptions. |
 
 ### Key Commands
 
@@ -443,6 +455,41 @@ cache
 systems
 ```
 
+### Pub/Sub
+
+Open one client and subscribe to a channel:
+
+```text
+SUBSCRIBE news
+subscribe
+news
+1
+```
+
+Open another client and publish a message:
+
+```text
+PUBLISH news launch
+1
+```
+
+The subscribed client receives:
+
+```text
+message
+news
+launch
+```
+
+Unsubscribe when finished:
+
+```text
+UNSUBSCRIBE news
+unsubscribe
+news
+0
+```
+
 ## Error Behavior
 
 SwiftCache returns simple text errors:
@@ -474,9 +521,9 @@ The current tests cover inline parsing, RESP request parsing, strings, TTL, list
 
 Potential next phases:
 
-- Pub/Sub
 - Authentication
 - LRU/LFU eviction
 - Replication starter
+- Transactions
 - Thread pool or event-loop networking
 - Integration tests over TCP

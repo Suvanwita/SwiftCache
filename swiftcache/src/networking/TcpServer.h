@@ -2,6 +2,11 @@
 
 #include <atomic>
 #include <cstdint>
+#include <mutex>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 #include "../core/AofPersistence.h"
 #include "../core/CommandRegistry.h"
@@ -23,6 +28,15 @@ private:
     void acceptLoop();
     void handleClient(int clientFd) const;
     bool sendResponse(int clientFd, const std::string& response) const;
+    bool handlePubSubCommand(int clientFd, const ParsedCommand& command,
+                             const std::vector<std::string>& tokens) const;
+    std::string subscribe(int clientFd, RequestProtocol protocol,
+                          const std::vector<std::string>& channels) const;
+    std::string unsubscribe(int clientFd, RequestProtocol protocol,
+                            const std::vector<std::string>& channels) const;
+    std::string publish(RequestProtocol protocol, const std::string& channel,
+                        const std::string& message) const;
+    void removeClientSubscriptions(int clientFd) const;
 
     std::uint16_t port_;
     DataStore& store_;
@@ -32,6 +46,10 @@ private:
     CommandParser parser_;
     int serverFd_{-1};
     std::atomic<bool> running_{false};
+    mutable std::mutex sendMutex_;
+    mutable std::mutex pubsubMutex_;
+    mutable std::unordered_map<std::string, std::unordered_map<int, RequestProtocol>> channelSubscribers_;
+    mutable std::unordered_map<int, std::unordered_set<std::string>> clientSubscriptions_;
 };
 
 } // namespace swiftcache
