@@ -41,6 +41,7 @@ struct ServerConfig {
     std::string snapshotPath{SWIFTCACHE_SNAPSHOT_PATH};
     bool aofEnabled{true};
     bool snapshotEnabled{true};
+    swiftcache::EvictionConfig eviction;
 };
 
 std::string trim(std::string value) {
@@ -91,6 +92,45 @@ bool parsePort(const std::string& raw, std::uint16_t& port) {
     }
 }
 
+bool parseSize(const std::string& raw, std::size_t& size) {
+    try {
+        std::size_t consumed = 0;
+        const auto parsed = std::stoull(raw, &consumed);
+        if (consumed != raw.size()) {
+            return false;
+        }
+        size = static_cast<std::size_t>(parsed);
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+bool parseEvictionPolicy(const std::string& raw, swiftcache::EvictionPolicy& policy) {
+    const auto value = toLower(trim(raw));
+    if (value == "none" || value == "noeviction") {
+        policy = swiftcache::EvictionPolicy::None;
+        return true;
+    }
+    if (value == "allkeys-lru") {
+        policy = swiftcache::EvictionPolicy::AllKeysLru;
+        return true;
+    }
+    if (value == "volatile-lru") {
+        policy = swiftcache::EvictionPolicy::VolatileLru;
+        return true;
+    }
+    if (value == "ttl-priority") {
+        policy = swiftcache::EvictionPolicy::TtlPriority;
+        return true;
+    }
+    if (value == "random") {
+        policy = swiftcache::EvictionPolicy::Random;
+        return true;
+    }
+    return false;
+}
+
 bool applyConfigOption(ServerConfig& config, const std::string& key, const std::string& value,
                        std::string& error) {
     const auto normalizedKey = toLower(trim(key));
@@ -125,6 +165,27 @@ bool applyConfigOption(ServerConfig& config, const std::string& key, const std::
     if (normalizedKey == "snapshot_enabled") {
         if (!parseBool(normalizedValue, config.snapshotEnabled)) {
             error = "invalid boolean for snapshot_enabled: " + normalizedValue;
+            return false;
+        }
+        return true;
+    }
+    if (normalizedKey == "max_keys") {
+        if (!parseSize(normalizedValue, config.eviction.maxKeys)) {
+            error = "invalid max_keys: " + normalizedValue;
+            return false;
+        }
+        return true;
+    }
+    if (normalizedKey == "max_memory") {
+        if (!parseSize(normalizedValue, config.eviction.maxMemoryBytes)) {
+            error = "invalid max_memory: " + normalizedValue;
+            return false;
+        }
+        return true;
+    }
+    if (normalizedKey == "eviction_policy") {
+        if (!parseEvictionPolicy(normalizedValue, config.eviction.policy)) {
+            error = "invalid eviction_policy: " + normalizedValue;
             return false;
         }
         return true;
@@ -201,6 +262,9 @@ void printUsage() {
         << "  --aof <path>           Append-only file path.\n"
         << "  --snapshot <path>      Snapshot file path.\n"
         << "  --config <path>        Load key=value config before CLI overrides.\n"
+        << "  --max-keys <count>     Evict keys above this key count. 0 disables.\n"
+        << "  --max-memory <bytes>   Evict keys above this estimated memory. 0 disables.\n"
+        << "  --eviction-policy <p>  none, allkeys-lru, volatile-lru, ttl-priority, random.\n"
         << "  --no-aof              Disable AOF replay and writes.\n"
         << "  --no-snapshot         Disable snapshot load and background saves.\n"
         << "  --help                Show this help.\n";
@@ -236,6 +300,21 @@ bool parseCommandLine(int argc, char* argv[], ServerConfig& config, bool& should
             config.snapshotPath = value;
         } else if (readValue("--config", value)) {
             continue;
+        } else if (readValue("--max-keys", value)) {
+            if (!parseSize(value, config.eviction.maxKeys)) {
+                std::cerr << "invalid --max-keys value: " << value << "\n";
+                return false;
+            }
+        } else if (readValue("--max-memory", value)) {
+            if (!parseSize(value, config.eviction.maxMemoryBytes)) {
+                std::cerr << "invalid --max-memory value: " << value << "\n";
+                return false;
+            }
+        } else if (readValue("--eviction-policy", value)) {
+            if (!parseEvictionPolicy(value, config.eviction.policy)) {
+                std::cerr << "invalid --eviction-policy value: " << value << "\n";
+                return false;
+            }
         } else if (arg == "--no-aof") {
             config.aofEnabled = false;
         } else if (arg == "--no-snapshot") {
@@ -275,6 +354,7 @@ int main(int argc, char* argv[]) {
     }
 
     swiftcache::DataStore store;
+    store.configureEviction(config.eviction);
     swiftcache::ServerMetrics metrics;
     swiftcache::ExpiryWorker expiryWorker(store);
     auto registry = swiftcache::buildCommandRegistry(std::chrono::steady_clock::now(), metrics);

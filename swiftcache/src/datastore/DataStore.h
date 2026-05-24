@@ -26,10 +26,27 @@ struct ValueObject {
     std::string type;
     long long createdAt;
     long long expiresAt;
+    long long lastAccessedAt{-1};
 };
 
 struct StoreStats {
     std::size_t keys{0};
+    std::size_t estimatedBytes{0};
+    std::size_t evictedKeys{0};
+};
+
+enum class EvictionPolicy {
+    None,
+    AllKeysLru,
+    VolatileLru,
+    TtlPriority,
+    Random
+};
+
+struct EvictionConfig {
+    std::size_t maxKeys{0};
+    std::size_t maxMemoryBytes{0};
+    EvictionPolicy policy{EvictionPolicy::None};
 };
 
 enum class DataStoreStatus {
@@ -70,6 +87,7 @@ struct SnapshotEntry {
 
 class DataStore {
 public:
+    void configureEviction(const EvictionConfig& config);
     void set(const std::string& key, const std::string& value, long long ttlSeconds = -1);
     std::optional<std::string> get(const std::string& key);
     bool del(const std::string& key);
@@ -113,10 +131,16 @@ private:
     static bool matchesPattern(const std::string& value, const std::string& pattern);
     static std::pair<std::size_t, std::size_t> normalizeRange(long long start, long long stop,
                                                               std::size_t size);
+    static std::size_t estimateObjectBytes(const std::string& key, const ValueObject& object);
     bool isExpired(const ValueObject& object, long long now) const;
+    bool overEvictionLimitLocked() const;
+    bool evictOneLocked();
+    void evictIfNeededLocked();
 
     mutable std::mutex mutex_;
     std::unordered_map<std::string, ValueObject> values_;
+    EvictionConfig evictionConfig_;
+    std::size_t evictedKeys_{0};
 };
 
 } // namespace swiftcache

@@ -25,6 +25,8 @@ CommandResult InfoCommand::execute(const std::vector<std::string>& args, DataSto
     std::ostringstream out;
     out << "{\n";
     out << " totalKeys: " << stats.keys << ",\n";
+    out << " estimatedBytes: " << stats.estimatedBytes << ",\n";
+    out << " evictedKeys: " << stats.evictedKeys << ",\n";
     out << " connectedClients: " << metrics_.connectedClients() << ",\n";
     out << " totalCommands: " << metrics_.totalCommands() << ",\n";
     out << " uptimeSeconds: " << uptime.count() << "\n";

@@ -135,6 +135,35 @@ int main() {
     assert(run(registry, store, {"FLUSHDB"}).response == "OK\n");
     assert(run(registry, store, {"KEYS"}).response == "");
 
+    swiftcache::DataStore lruStore;
+    lruStore.configureEviction(swiftcache::EvictionConfig{2, 0, swiftcache::EvictionPolicy::AllKeysLru});
+    assert(run(registry, lruStore, {"SET", "lru:a", "1"}).response == "OK\n");
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    assert(run(registry, lruStore, {"SET", "lru:b", "2"}).response == "OK\n");
+    assert(run(registry, lruStore, {"GET", "lru:a"}).response == "1\n");
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    assert(run(registry, lruStore, {"SET", "lru:c", "3"}).response == "OK\n");
+    assert(run(registry, lruStore, {"GET", "lru:a"}).response == "1\n");
+    assert(run(registry, lruStore, {"GET", "lru:b"}).response == "(nil)\n");
+    assert(run(registry, lruStore, {"GET", "lru:c"}).response == "3\n");
+    assert(lruStore.stats().evictedKeys == 1);
+
+    swiftcache::DataStore volatileStore;
+    volatileStore.configureEviction(swiftcache::EvictionConfig{1, 0, swiftcache::EvictionPolicy::VolatileLru});
+    assert(run(registry, volatileStore, {"SET", "permanent", "1"}).response == "OK\n");
+    assert(run(registry, volatileStore, {"SET", "temporary", "2", "EX", "60"}).response == "OK\n");
+    assert(run(registry, volatileStore, {"GET", "permanent"}).response == "1\n");
+    assert(run(registry, volatileStore, {"GET", "temporary"}).response == "(nil)\n");
+
+    swiftcache::DataStore ttlPriorityStore;
+    ttlPriorityStore.configureEviction(swiftcache::EvictionConfig{2, 0, swiftcache::EvictionPolicy::TtlPriority});
+    assert(run(registry, ttlPriorityStore, {"SET", "far", "1", "EX", "60"}).response == "OK\n");
+    assert(run(registry, ttlPriorityStore, {"SET", "near", "2", "EX", "1"}).response == "OK\n");
+    assert(run(registry, ttlPriorityStore, {"SET", "plain", "3"}).response == "OK\n");
+    assert(run(registry, ttlPriorityStore, {"GET", "near"}).response == "(nil)\n");
+    assert(run(registry, ttlPriorityStore, {"GET", "far"}).response == "1\n");
+    assert(run(registry, ttlPriorityStore, {"GET", "plain"}).response == "3\n");
+
     const std::string aofPath = "/tmp/swiftcache-command-tests.aof";
     std::filesystem::remove(aofPath);
     swiftcache::AofPersistence aof(aofPath);

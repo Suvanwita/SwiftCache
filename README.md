@@ -9,7 +9,7 @@ The current implementation supports strings, lists, hashes, sets, TTL, automatic
 
 - C++17 implementation
 - TCP socket server on `localhost:6379`
-- Configurable bind host, port, persistence paths, and persistence modes
+- Configurable bind host, port, persistence paths, persistence modes, and eviction policy
 - Inline text protocol for manual `telnet`/`nc` usage
 - RESP array/bulk-string request parsing for Redis-style clients
 - Multiple threaded client connections
@@ -22,6 +22,8 @@ The current implementation supports strings, lists, hashes, sets, TTL, automatic
 - Periodic snapshot persistence with startup restore
 - Append-only file persistence with startup replay
 - Pub/Sub messaging with `SUBSCRIBE`, `PUBLISH`, and `UNSUBSCRIBE`
+- Optional key-count and estimated-memory eviction limits
+- Eviction policies: `allkeys-lru`, `volatile-lru`, `ttl-priority`, and `random`
 - Keyspace inspection with `KEYS`, `TYPE`, `SCAN`, `RENAME`, and `FLUSHDB`
 - Server metrics through `INFO`
 - CMake and Makefile build support
@@ -103,6 +105,12 @@ Disable persistence modes when you want a purely in-memory development server:
 ./SwiftCache --no-aof --no-snapshot
 ```
 
+Run with a bounded cache policy:
+
+```sh
+./SwiftCache --max-keys 10000 --eviction-policy allkeys-lru
+```
+
 Or use the Makefile from the repository root:
 
 ```sh
@@ -129,6 +137,9 @@ SwiftCache can be configured with CLI arguments, a config file, or both. When bo
 | `--aof <path>` | Append-only file path. Defaults to `storage/swiftcache.aof`. |
 | `--snapshot <path>` | Snapshot file path. Defaults to `storage/swiftcache.snapshot`. |
 | `--config <path>` | Loads a key/value config file before applying CLI overrides. |
+| `--max-keys <count>` | Evicts keys when the datastore grows above this key count. `0` disables the key-count limit. |
+| `--max-memory <bytes>` | Evicts keys when estimated stored data grows above this size. `0` disables the memory limit. |
+| `--eviction-policy <policy>` | Eviction policy. Supported values: `none`, `allkeys-lru`, `volatile-lru`, `ttl-priority`, `random`. |
 | `--no-aof` | Disables AOF startup replay and command appends. |
 | `--no-snapshot` | Disables snapshot startup restore and background snapshot saves. |
 | `--help` | Prints available options. |
@@ -144,6 +155,9 @@ aof=storage/swiftcache.aof
 snapshot=storage/swiftcache.snapshot
 aof_enabled=true
 snapshot_enabled=true
+max_keys=0
+max_memory=0
+eviction_policy=none
 ```
 
 Run with a config file:
@@ -157,6 +171,20 @@ Override one value from the config file:
 ```sh
 ./SwiftCache --config swiftcache.conf --port 6380
 ```
+
+### Eviction Policies
+
+Eviction is disabled by default. Set `max_keys`, `max_memory`, or both, then choose a policy.
+
+| Policy | Behavior |
+| --- | --- |
+| `none` | Does not evict keys. Limits are ignored if this policy is active. |
+| `allkeys-lru` | Evicts the least recently accessed key from all keys. |
+| `volatile-lru` | Evicts the least recently accessed key only among keys with TTL. If no TTL keys exist, the limit may remain exceeded. |
+| `ttl-priority` | Evicts keys with the nearest expiration time first. If no TTL keys exist, the limit may remain exceeded. |
+| `random` | Evicts random keys. |
+
+`max_memory` uses SwiftCache's internal estimate of stored key/value data. It is useful for cache pressure behavior, but it is not the same as operating-system RSS memory.
 
 ## Connecting And Protocols
 
@@ -352,6 +380,8 @@ PONG
 INFO
 {
  totalKeys: 0,
+ estimatedBytes: 0,
+ evictedKeys: 0,
  connectedClients: 1,
  totalCommands: 2,
  uptimeSeconds: 4
@@ -577,7 +607,6 @@ The current tests cover inline parsing, RESP request parsing, strings, TTL, list
 Potential next phases:
 
 - Authentication
-- LRU/LFU eviction
 - Replication starter
 - Transactions
 - Thread pool or event-loop networking

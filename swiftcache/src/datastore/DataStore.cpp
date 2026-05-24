@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <chrono>
 #include <exception>
+#include <iterator>
+#include <limits>
+#include <random>
 
 namespace swiftcache {
 
@@ -13,6 +16,98 @@ long long DataStore::nowMillis() {
 
 bool DataStore::isExpired(const ValueObject& object, long long now) const {
     return object.expiresAt != -1 && object.expiresAt <= now;
+}
+
+std::size_t DataStore::estimateObjectBytes(const std::string& key, const ValueObject& object) {
+    std::size_t total = key.size() + object.type.size() + object.value.size() + sizeof(ValueObject);
+    for (const auto& value : object.list) {
+        total += value.size() + sizeof(std::string);
+    }
+    for (const auto& entry : object.hash) {
+        total += entry.first.size() + entry.second.size() + (sizeof(std::string) * 2);
+    }
+    for (const auto& member : object.set) {
+        total += member.size() + sizeof(std::string);
+    }
+    return total;
+}
+
+bool DataStore::overEvictionLimitLocked() const {
+    if (evictionConfig_.maxKeys > 0 && values_.size() > evictionConfig_.maxKeys) {
+        return true;
+    }
+
+    if (evictionConfig_.maxMemoryBytes == 0) {
+        return false;
+    }
+
+    std::size_t estimated = 0;
+    for (const auto& entry : values_) {
+        estimated += estimateObjectBytes(entry.first, entry.second);
+        if (estimated > evictionConfig_.maxMemoryBytes) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool DataStore::evictOneLocked() {
+    if (values_.empty() || evictionConfig_.policy == EvictionPolicy::None) {
+        return false;
+    }
+
+    auto victim = values_.end();
+
+    if (evictionConfig_.policy == EvictionPolicy::Random) {
+        static thread_local std::mt19937 generator{std::random_device{}()};
+        std::uniform_int_distribution<std::size_t> distribution(0, values_.size() - 1);
+        victim = values_.begin();
+        std::advance(victim, static_cast<long>(distribution(generator)));
+    } else if (evictionConfig_.policy == EvictionPolicy::TtlPriority) {
+        long long earliestExpiry = std::numeric_limits<long long>::max();
+        for (auto it = values_.begin(); it != values_.end(); ++it) {
+            if (it->second.expiresAt != -1 && it->second.expiresAt < earliestExpiry) {
+                earliestExpiry = it->second.expiresAt;
+                victim = it;
+            }
+        }
+    } else {
+        long long oldestAccess = std::numeric_limits<long long>::max();
+        for (auto it = values_.begin(); it != values_.end(); ++it) {
+            if (evictionConfig_.policy == EvictionPolicy::VolatileLru && it->second.expiresAt == -1) {
+                continue;
+            }
+            const long long lastAccessed = it->second.lastAccessedAt == -1
+                ? it->second.createdAt
+                : it->second.lastAccessedAt;
+            if (lastAccessed < oldestAccess) {
+                oldestAccess = lastAccessed;
+                victim = it;
+            }
+        }
+    }
+
+    if (victim == values_.end()) {
+        return false;
+    }
+
+    values_.erase(victim);
+    ++evictedKeys_;
+    return true;
+}
+
+void DataStore::evictIfNeededLocked() {
+    while (overEvictionLimitLocked()) {
+        if (!evictOneLocked()) {
+            break;
+        }
+    }
+}
+
+void DataStore::configureEviction(const EvictionConfig& config) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    evictionConfig_ = config;
+    evictIfNeededLocked();
 }
 
 bool DataStore::parseInteger(const std::string& value, long long& parsed) {
@@ -82,7 +177,8 @@ void DataStore::set(const std::string& key, const std::string& value, long long 
     std::lock_guard<std::mutex> lock(mutex_);
     const long long createdAt = nowMillis();
     const long long expiresAt = ttlSeconds >= 0 ? createdAt + (ttlSeconds * 1000) : -1;
-    values_[key] = ValueObject{value, {}, {}, {}, data_type::String, createdAt, expiresAt};
+    values_[key] = ValueObject{value, {}, {}, {}, data_type::String, createdAt, expiresAt, createdAt};
+    evictIfNeededLocked();
 }
 
 std::optional<std::string> DataStore::get(const std::string& key) {
@@ -101,6 +197,7 @@ std::optional<std::string> DataStore::get(const std::string& key) {
         return std::nullopt;
     }
 
+    it->second.lastAccessedAt = nowMillis();
     return it->second.value;
 }
 
@@ -121,6 +218,7 @@ bool DataStore::exists(const std::string& key) {
         return false;
     }
 
+    it->second.lastAccessedAt = nowMillis();
     return true;
 }
 
@@ -158,6 +256,7 @@ long long DataStore::ttl(const std::string& key) {
         return -1;
     }
 
+    it->second.lastAccessedAt = now;
     const long long remainingMillis = it->second.expiresAt - now;
     return (remainingMillis + 999) / 1000;
 }
@@ -179,6 +278,8 @@ bool DataStore::persist(const std::string& key) {
     }
 
     it->second.expiresAt = -1;
+    it->second.lastAccessedAt = nowMillis();
+    evictIfNeededLocked();
     return true;
 }
 
@@ -206,7 +307,8 @@ std::optional<long long> DataStore::incrBy(const std::string& key, long long del
 
     const long long updated = current + delta;
     const long long createdAt = it == values_.end() ? now : it->second.createdAt;
-    values_[key] = ValueObject{std::to_string(updated), {}, {}, {}, data_type::String, createdAt, expiresAt};
+    values_[key] = ValueObject{std::to_string(updated), {}, {}, {}, data_type::String, createdAt, expiresAt, now};
+    evictIfNeededLocked();
     return updated;
 }
 
@@ -221,7 +323,8 @@ std::optional<std::size_t> DataStore::append(const std::string& key, const std::
     }
 
     if (it == values_.end()) {
-        values_[key] = ValueObject{suffix, {}, {}, {}, data_type::String, now, -1};
+        values_[key] = ValueObject{suffix, {}, {}, {}, data_type::String, now, -1, now};
+        evictIfNeededLocked();
         return suffix.size();
     }
 
@@ -230,6 +333,8 @@ std::optional<std::size_t> DataStore::append(const std::string& key, const std::
     }
 
     it->second.value += suffix;
+    it->second.lastAccessedAt = now;
+    evictIfNeededLocked();
     return it->second.value.size();
 }
 
@@ -249,6 +354,7 @@ std::optional<std::size_t> DataStore::strlen(const std::string& key) {
         return std::nullopt;
     }
 
+    it->second.lastAccessedAt = nowMillis();
     return it->second.value.size();
 }
 
@@ -271,8 +377,12 @@ std::vector<std::optional<std::string>> DataStore::mget(const std::vector<std::s
             continue;
         }
 
-        values.push_back(it->second.type == data_type::String ? std::optional<std::string>(it->second.value)
-                                                              : std::nullopt);
+        if (it->second.type == data_type::String) {
+            it->second.lastAccessedAt = now;
+            values.push_back(it->second.value);
+        } else {
+            values.push_back(std::nullopt);
+        }
     }
 
     return values;
@@ -283,8 +393,9 @@ void DataStore::mset(const std::vector<std::pair<std::string, std::string>>& ent
     const long long now = nowMillis();
 
     for (const auto& entry : entries) {
-        values_[entry.first] = ValueObject{entry.second, {}, {}, {}, data_type::String, now, -1};
+        values_[entry.first] = ValueObject{entry.second, {}, {}, {}, data_type::String, now, -1, now};
     }
+    evictIfNeededLocked();
 }
 
 std::optional<std::size_t> DataStore::lpush(const std::string& key,
@@ -304,7 +415,9 @@ std::optional<std::size_t> DataStore::lpush(const std::string& key,
             object.list.push_front(value);
         }
         const std::size_t size = object.list.size();
+        object.lastAccessedAt = now;
         values_[key] = std::move(object);
+        evictIfNeededLocked();
         return size;
     }
 
@@ -315,6 +428,8 @@ std::optional<std::size_t> DataStore::lpush(const std::string& key,
     for (const auto& value : values) {
         it->second.list.push_front(value);
     }
+    it->second.lastAccessedAt = now;
+    evictIfNeededLocked();
     return it->second.list.size();
 }
 
@@ -335,7 +450,9 @@ std::optional<std::size_t> DataStore::rpush(const std::string& key,
             object.list.push_back(value);
         }
         const std::size_t size = object.list.size();
+        object.lastAccessedAt = now;
         values_[key] = std::move(object);
+        evictIfNeededLocked();
         return size;
     }
 
@@ -346,6 +463,8 @@ std::optional<std::size_t> DataStore::rpush(const std::string& key,
     for (const auto& value : values) {
         it->second.list.push_back(value);
     }
+    it->second.lastAccessedAt = now;
+    evictIfNeededLocked();
     return it->second.list.size();
 }
 
@@ -374,6 +493,8 @@ ListPopResult DataStore::lpop(const std::string& key) {
     it->second.list.pop_front();
     if (it->second.list.empty()) {
         values_.erase(it);
+    } else {
+        it->second.lastAccessedAt = now;
     }
     return {DataStoreStatus::Ok, value};
 }
@@ -403,6 +524,8 @@ ListPopResult DataStore::rpop(const std::string& key) {
     it->second.list.pop_back();
     if (it->second.list.empty()) {
         values_.erase(it);
+    } else {
+        it->second.lastAccessedAt = now;
     }
     return {DataStoreStatus::Ok, value};
 }
@@ -435,6 +558,7 @@ ListRangeResult DataStore::lrange(const std::string& key, long long start, long 
         result.push_back(it->second.list[i]);
     }
 
+    it->second.lastAccessedAt = now;
     return {DataStoreStatus::Ok, result};
 }
 
@@ -452,7 +576,9 @@ std::optional<std::size_t> DataStore::hset(const std::string& key, const std::st
     if (it == values_.end()) {
         ValueObject object{"", {}, {}, {}, data_type::Hash, now, -1};
         object.hash[field] = value;
+        object.lastAccessedAt = now;
         values_[key] = std::move(object);
+        evictIfNeededLocked();
         return 1;
     }
 
@@ -462,6 +588,8 @@ std::optional<std::size_t> DataStore::hset(const std::string& key, const std::st
 
     const bool isNewField = it->second.hash.find(field) == it->second.hash.end();
     it->second.hash[field] = value;
+    it->second.lastAccessedAt = now;
+    evictIfNeededLocked();
     return isNewField ? 1 : 0;
 }
 
@@ -487,6 +615,7 @@ HashGetResult DataStore::hget(const std::string& key, const std::string& field) 
         return {DataStoreStatus::Missing, std::nullopt};
     }
 
+    it->second.lastAccessedAt = now;
     return {DataStoreStatus::Ok, fieldIt->second};
 }
 
@@ -510,6 +639,8 @@ std::optional<std::size_t> DataStore::hdel(const std::string& key, const std::st
     const std::size_t removed = it->second.hash.erase(field);
     if (it->second.hash.empty()) {
         values_.erase(it);
+    } else {
+        it->second.lastAccessedAt = now;
     }
 
     return removed;
@@ -532,6 +663,7 @@ std::optional<bool> DataStore::hexists(const std::string& key, const std::string
         return std::nullopt;
     }
 
+    it->second.lastAccessedAt = now;
     return it->second.hash.find(field) != it->second.hash.end();
 }
 
@@ -562,6 +694,7 @@ HashGetAllResult DataStore::hgetall(const std::string& key) {
         return lhs.first < rhs.first;
     });
 
+    it->second.lastAccessedAt = now;
     return {DataStoreStatus::Ok, fields};
 }
 
@@ -582,7 +715,9 @@ std::optional<std::size_t> DataStore::sadd(const std::string& key,
         for (const auto& member : members) {
             added += object.set.insert(member).second ? 1 : 0;
         }
+        object.lastAccessedAt = now;
         values_[key] = std::move(object);
+        evictIfNeededLocked();
         return added;
     }
 
@@ -594,6 +729,8 @@ std::optional<std::size_t> DataStore::sadd(const std::string& key,
     for (const auto& member : members) {
         added += it->second.set.insert(member).second ? 1 : 0;
     }
+    it->second.lastAccessedAt = now;
+    evictIfNeededLocked();
     return added;
 }
 
@@ -621,6 +758,8 @@ std::optional<std::size_t> DataStore::srem(const std::string& key,
     }
     if (it->second.set.empty()) {
         values_.erase(it);
+    } else {
+        it->second.lastAccessedAt = now;
     }
 
     return removed;
@@ -643,6 +782,7 @@ std::optional<bool> DataStore::sismember(const std::string& key, const std::stri
         return std::nullopt;
     }
 
+    it->second.lastAccessedAt = now;
     return it->second.set.find(member) != it->second.set.end();
 }
 
@@ -665,6 +805,7 @@ SetMembersResult DataStore::smembers(const std::string& key) {
 
     std::vector<std::string> members(it->second.set.begin(), it->second.set.end());
     std::sort(members.begin(), members.end());
+    it->second.lastAccessedAt = now;
     return {DataStoreStatus::Ok, members};
 }
 
@@ -685,6 +826,7 @@ std::optional<std::size_t> DataStore::scard(const std::string& key) {
         return std::nullopt;
     }
 
+    it->second.lastAccessedAt = now;
     return it->second.set.size();
 }
 
@@ -715,6 +857,7 @@ std::string DataStore::type(const std::string& key) {
         return "none";
     }
 
+    it->second.lastAccessedAt = nowMillis();
     return it->second.type;
 }
 
@@ -735,7 +878,9 @@ bool DataStore::rename(const std::string& source, const std::string& destination
     }
 
     values_[destination] = std::move(it->second);
+    values_[destination].lastAccessedAt = nowMillis();
     values_.erase(it);
+    evictIfNeededLocked();
     return true;
 }
 
@@ -775,8 +920,13 @@ void DataStore::loadSnapshot(const std::vector<SnapshotEntry>& entries) {
         if (isExpired(entry.value, now)) {
             continue;
         }
-        values_[entry.key] = entry.value;
+        auto value = entry.value;
+        if (value.lastAccessedAt == -1) {
+            value.lastAccessedAt = now;
+        }
+        values_[entry.key] = std::move(value);
     }
+    evictIfNeededLocked();
 }
 
 std::size_t DataStore::removeExpired() {
@@ -798,7 +948,11 @@ std::size_t DataStore::removeExpired() {
 
 StoreStats DataStore::stats() const {
     std::lock_guard<std::mutex> lock(mutex_);
-    return StoreStats{values_.size()};
+    std::size_t estimatedBytes = 0;
+    for (const auto& entry : values_) {
+        estimatedBytes += estimateObjectBytes(entry.first, entry.second);
+    }
+    return StoreStats{values_.size(), estimatedBytes, evictedKeys_};
 }
 
 } // namespace swiftcache
