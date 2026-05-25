@@ -938,6 +938,7 @@ std::size_t DataStore::removeExpired() {
         if (isExpired(it->second, now)) {
             it = values_.erase(it);
             ++removed;
+            ++expiredKeys_;
         } else {
             ++it;
         }
@@ -952,7 +953,7 @@ StoreStats DataStore::stats() const {
     for (const auto& entry : values_) {
         estimatedBytes += estimateObjectBytes(entry.first, entry.second);
     }
-    return StoreStats{values_.size(), estimatedBytes, evictedKeys_};
+    return StoreStats{values_.size(), estimatedBytes, evictedKeys_, expiredKeys_};
 }
 
 } // namespace swiftcache

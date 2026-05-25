@@ -357,12 +357,14 @@ int main(int argc, char* argv[]) {
     store.configureEviction(config.eviction);
     swiftcache::ServerMetrics metrics;
     swiftcache::ExpiryWorker expiryWorker(store);
-    auto registry = swiftcache::buildCommandRegistry(std::chrono::steady_clock::now(), metrics);
 
     std::unique_ptr<swiftcache::AofPersistence> aof;
     if (config.aofEnabled) {
         aof = std::make_unique<swiftcache::AofPersistence>(config.aofPath);
     }
+
+    auto registry = swiftcache::buildCommandRegistry(std::chrono::steady_clock::now(), metrics,
+                                                     aof.get());
 
     std::unique_ptr<swiftcache::SnapshotPersistence> snapshot;
     if (config.snapshotEnabled) {
@@ -381,7 +383,8 @@ int main(int argc, char* argv[]) {
     swiftcache::TcpServer server(config.host, config.port, store, registry, metrics, aof.get());
     std::unique_ptr<swiftcache::SnapshotWorker> snapshotWorker;
     if (snapshot != nullptr) {
-        snapshotWorker = std::make_unique<swiftcache::SnapshotWorker>(store, *snapshot, aof.get());
+        snapshotWorker = std::make_unique<swiftcache::SnapshotWorker>(store, *snapshot, aof.get(),
+                                                                      &metrics);
     }
 
     expiryWorker.start();

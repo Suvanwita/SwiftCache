@@ -33,6 +33,7 @@ struct StoreStats {
     std::size_t keys{0};
     std::size_t estimatedBytes{0};
     std::size_t evictedKeys{0};
+    std::size_t expiredKeys{0};
 };
 
 enum class EvictionPolicy {
@@ -141,6 +142,7 @@ private:
     std::unordered_map<std::string, ValueObject> values_;
     EvictionConfig evictionConfig_;
     std::size_t evictedKeys_{0};
+    std::size_t expiredKeys_{0};
 };
 
 } // namespace swiftcache

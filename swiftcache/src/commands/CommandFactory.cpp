@@ -39,7 +39,7 @@
 namespace swiftcache {
 
 CommandRegistry buildCommandRegistry(std::chrono::steady_clock::time_point startedAt,
-                                     const ServerMetrics& metrics) {
+                                     const ServerMetrics& metrics, const AofPersistence* aof) {
     CommandRegistry registry;
     registry.registerCommand(std::make_unique<PingCommand>());
     registry.registerCommand(std::make_unique<SetCommand>());
@@ -75,7 +75,7 @@ CommandRegistry buildCommandRegistry(std::chrono::steady_clock::time_point start
     registry.registerCommand(std::make_unique<RenameCommand>());
     registry.registerCommand(std::make_unique<FlushdbCommand>());
     registry.registerCommand(std::make_unique<ScanCommand>());
-    registry.registerCommand(std::make_unique<InfoCommand>(startedAt, metrics));
+    registry.registerCommand(std::make_unique<InfoCommand>(startedAt, metrics, aof));
     return registry;
 }
 

@@ -7,6 +7,7 @@
 #include <thread>
 
 #include "AofPersistence.h"
+#include "ServerMetrics.h"
 #include "SnapshotPersistence.h"
 #include "../datastore/DataStore.h"
 
@@ -15,6 +16,7 @@ namespace swiftcache {
 class SnapshotWorker {
 public:
     SnapshotWorker(DataStore& store, SnapshotPersistence& snapshot, AofPersistence* aof,
+                   ServerMetrics* metrics = nullptr,
                    std::chrono::seconds interval = std::chrono::seconds(30));
     ~SnapshotWorker();
 
@@ -30,6 +32,7 @@ private:
     DataStore& store_;
     SnapshotPersistence& snapshot_;
     AofPersistence* aof_;
+    ServerMetrics* metrics_;
     std::chrono::seconds interval_;
     std::atomic<bool> running_{false};
     std::condition_variable wakeup_;

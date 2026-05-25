@@ -116,6 +116,10 @@ bool isSuccessfulResponse(const std::string& response) {
     return response.rfind("ERR ", 0) != 0;
 }
 
+bool isRejectedResponse(const std::string& response) {
+    return response.rfind("ERR ", 0) == 0;
+}
+
 std::string formatPubSubTuple(RequestProtocol protocol, const std::string& kind,
                               const std::string& channel, std::size_t count) {
     if (protocol == RequestProtocol::Resp) {
@@ -256,7 +260,7 @@ void TcpServer::handleClient(int clientFd) const {
             }
 
             if (!command.tokens.empty()) {
-                metrics_.commandExecuted();
+                metrics_.commandExecuted(toUpper(command.tokens.front()));
                 if (handlePubSubCommand(clientFd, command, command.tokens)) {
                     continue;
                 }
@@ -269,6 +273,9 @@ void TcpServer::handleClient(int clientFd) const {
                     }, appendSucceeded);
                 if (!appendSucceeded && isSuccessfulResponse(result.response)) {
                     std::cerr << "failed to append command to AOF\n";
+                }
+                if (isRejectedResponse(result.response)) {
+                    metrics_.commandRejected();
                 }
                 const auto response = command.protocol == RequestProtocol::Resp
                     ? formatRespResponse(result.response)
@@ -333,8 +340,12 @@ bool TcpServer::handlePubSubCommand(int clientFd, const ParsedCommand& command,
         return false;
     }
 
-    if (command.protocol == RequestProtocol::Resp && response.rfind("ERR ", 0) == 0) {
+    const bool rejected = isRejectedResponse(response);
+    if (command.protocol == RequestProtocol::Resp && rejected) {
         response = formatRespResponse(response);
+    }
+    if (rejected) {
+        metrics_.commandRejected();
     }
     sendResponse(clientFd, response);
     return true;

@@ -5,8 +5,9 @@
 namespace swiftcache {
 
 SnapshotWorker::SnapshotWorker(DataStore& store, SnapshotPersistence& snapshot,
-                               AofPersistence* aof, std::chrono::seconds interval)
-    : store_(store), snapshot_(snapshot), aof_(aof), interval_(interval) {}
+                               AofPersistence* aof, ServerMetrics* metrics,
+                               std::chrono::seconds interval)
+    : store_(store), snapshot_(snapshot), aof_(aof), metrics_(metrics), interval_(interval) {}
 
 SnapshotWorker::~SnapshotWorker() {
     stop();
@@ -47,6 +48,8 @@ void SnapshotWorker::run() {
             });
         if (!saved) {
             std::cerr << "failed to write SwiftCache snapshot\n";
+        } else if (metrics_ != nullptr) {
+            metrics_->snapshotSaved();
         }
     }
 }

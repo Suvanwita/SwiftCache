@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <cstdint>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -22,6 +23,7 @@ public:
                                    bool& appendSucceeded);
     bool checkpoint(const std::function<bool()>& saveSnapshot);
     bool isMutatingCommand(const std::vector<std::string>& tokens) const;
+    std::uintmax_t sizeBytes() const;
 
     const std::string& path() const;
 

@@ -126,6 +126,13 @@ bool AofPersistence::isMutatingCommand(const std::vector<std::string>& tokens) c
     return kMutatingCommands.find(toUpper(tokens.front())) != kMutatingCommands.end();
 }
 
+std::uintmax_t AofPersistence::sizeBytes() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::error_code error;
+    const auto size = std::filesystem::file_size(path_, error);
+    return error ? 0 : size;
+}
+
 const std::string& AofPersistence::path() const {
     return path_;
 }

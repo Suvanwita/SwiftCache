@@ -25,7 +25,7 @@ The current implementation supports strings, lists, hashes, sets, TTL, automatic
 - Optional key-count and estimated-memory eviction limits
 - Eviction policies: `allkeys-lru`, `volatile-lru`, `ttl-priority`, and `random`
 - Keyspace inspection with `KEYS`, `TYPE`, `SCAN`, `RENAME`, and `FLUSHDB`
-- Server metrics through `INFO`
+- Expanded server, persistence, and datastore metrics through `INFO`
 - CMake and Makefile build support
 - Unit tests for core command behavior
 
@@ -294,7 +294,7 @@ Snapshot files are written through a temporary file and atomically renamed into 
 | Command | Description |
 | --- | --- |
 | `PING` | Returns `PONG`. |
-| `INFO` | Returns server and datastore metrics. |
+| `INFO` | Returns server, persistence, command, client, and datastore metrics. |
 
 ### Pub/Sub Commands
 
@@ -381,9 +381,18 @@ INFO
 {
  totalKeys: 0,
  estimatedBytes: 0,
+ aofSizeBytes: 0,
  evictedKeys: 0,
+ expiredKeys: 0,
  connectedClients: 1,
+ peakConnectedClients: 1,
  totalCommands: 2,
+ rejectedCommands: 0,
+ lastSnapshotUnixSeconds: 0,
+ commandCounts: {
+  INFO: 1,
+  PING: 1
+ },
  uptimeSeconds: 4
 }
 ```
