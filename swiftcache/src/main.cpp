@@ -3,6 +3,7 @@
 #include <csignal>
 #include <cctype>
 #include <cstdint>
+#include <deque>
 #include <fstream>
 #include <iostream>
 #include <memory>
@@ -41,6 +42,7 @@ struct ServerConfig {
     std::string snapshotPath{SWIFTCACHE_SNAPSHOT_PATH};
     bool aofEnabled{true};
     bool snapshotEnabled{true};
+    std::size_t databaseCount{16};
     swiftcache::EvictionConfig eviction;
 };
 
@@ -169,6 +171,13 @@ bool applyConfigOption(ServerConfig& config, const std::string& key, const std::
         }
         return true;
     }
+    if (normalizedKey == "databases") {
+        if (!parseSize(normalizedValue, config.databaseCount) || config.databaseCount == 0) {
+            error = "invalid databases: " + normalizedValue;
+            return false;
+        }
+        return true;
+    }
     if (normalizedKey == "max_keys") {
         if (!parseSize(normalizedValue, config.eviction.maxKeys)) {
             error = "invalid max_keys: " + normalizedValue;
@@ -262,6 +271,7 @@ void printUsage() {
         << "  --aof <path>           Append-only file path.\n"
         << "  --snapshot <path>      Snapshot file path.\n"
         << "  --config <path>        Load key=value config before CLI overrides.\n"
+        << "  --databases <count>    Number of logical databases. Defaults to 16.\n"
         << "  --max-keys <count>     Evict keys above this key count. 0 disables.\n"
         << "  --max-memory <bytes>   Evict keys above this estimated memory. 0 disables.\n"
         << "  --eviction-policy <p>  none, allkeys-lru, volatile-lru, ttl-priority, random.\n"
@@ -300,6 +310,11 @@ bool parseCommandLine(int argc, char* argv[], ServerConfig& config, bool& should
             config.snapshotPath = value;
         } else if (readValue("--config", value)) {
             continue;
+        } else if (readValue("--databases", value)) {
+            if (!parseSize(value, config.databaseCount) || config.databaseCount == 0) {
+                std::cerr << "invalid --databases value: " << value << "\n";
+                return false;
+            }
         } else if (readValue("--max-keys", value)) {
             if (!parseSize(value, config.eviction.maxKeys)) {
                 std::cerr << "invalid --max-keys value: " << value << "\n";
@@ -353,10 +368,12 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-    swiftcache::DataStore store;
-    store.configureEviction(config.eviction);
+    std::deque<swiftcache::DataStore> stores(config.databaseCount);
+    for (auto& store : stores) {
+        store.configureEviction(config.eviction);
+    }
     swiftcache::ServerMetrics metrics;
-    swiftcache::ExpiryWorker expiryWorker(store);
+    swiftcache::ExpiryWorker expiryWorker(stores);
 
     std::unique_ptr<swiftcache::AofPersistence> aof;
     if (config.aofEnabled) {
@@ -369,21 +386,21 @@ int main(int argc, char* argv[]) {
     std::unique_ptr<swiftcache::SnapshotPersistence> snapshot;
     if (config.snapshotEnabled) {
         snapshot = std::make_unique<swiftcache::SnapshotPersistence>(config.snapshotPath);
-        if (!snapshot->load(store)) {
+        if (!snapshot->load(stores)) {
             std::cerr << "SwiftCache failed to load snapshot\n";
             return 1;
         }
     }
 
-    if (aof != nullptr && !aof->replay(registry, store)) {
+    if (aof != nullptr && !aof->replay(registry, stores)) {
         std::cerr << "SwiftCache failed to replay AOF\n";
         return 1;
     }
 
-    swiftcache::TcpServer server(config.host, config.port, store, registry, metrics, aof.get());
+    swiftcache::TcpServer server(config.host, config.port, stores, registry, metrics, aof.get());
     std::unique_ptr<swiftcache::SnapshotWorker> snapshotWorker;
     if (snapshot != nullptr) {
-        snapshotWorker = std::make_unique<swiftcache::SnapshotWorker>(store, *snapshot, aof.get(),
+        snapshotWorker = std::make_unique<swiftcache::SnapshotWorker>(stores, *snapshot, aof.get(),
                                                                       &metrics);
     }
 

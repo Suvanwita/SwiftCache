@@ -10,6 +10,7 @@ namespace swiftcache {
 namespace {
 
 constexpr const char* kMagic = "SWIFTCACHE_SNAPSHOT_V1";
+constexpr const char* kMultiDbMagic = "SWIFTCACHE_SNAPSHOT_V2";
 
 void writeLine(std::ostream& output, const std::string& value) {
     output << value << "\n";
@@ -77,24 +78,7 @@ bool readSize(std::istream& input, std::size_t& value) {
     }
 }
 
-} // namespace
-
-SnapshotPersistence::SnapshotPersistence(std::string path) : path_(std::move(path)) {}
-
-bool SnapshotPersistence::save(DataStore& store) const {
-    const auto parent = std::filesystem::path(path_).parent_path();
-    if (!parent.empty()) {
-        std::filesystem::create_directories(parent);
-    }
-
-    const auto tempPath = path_ + ".tmp";
-    std::ofstream output(tempPath, std::ios::binary | std::ios::trunc);
-    if (!output.is_open()) {
-        return false;
-    }
-
-    const auto entries = store.snapshot();
-    writeLine(output, kMagic);
+bool writeEntries(std::ostream& output, const std::vector<SnapshotEntry>& entries) {
     writeLine(output, std::to_string(entries.size()));
 
     for (const auto& entry : entries) {
@@ -133,34 +117,16 @@ bool SnapshotPersistence::save(DataStore& store) const {
         }
     }
 
-    output.flush();
-    if (!output.good()) {
-        return false;
-    }
-    output.close();
-
-    std::filesystem::rename(tempPath, path_);
-    return true;
+    return output.good();
 }
 
-bool SnapshotPersistence::load(DataStore& store) const {
-    std::ifstream input(path_, std::ios::binary);
-    if (!input.is_open()) {
-        return true;
-    }
-
-    std::string magic;
-    if (!readLine(input, magic) || magic != kMagic) {
-        std::cerr << "invalid snapshot file: " << path_ << "\n";
-        return false;
-    }
-
+bool readEntries(std::istream& input, std::vector<SnapshotEntry>& entries) {
     std::size_t entryCount = 0;
     if (!readSize(input, entryCount)) {
         return false;
     }
 
-    std::vector<SnapshotEntry> entries;
+    entries.clear();
     entries.reserve(entryCount);
 
     for (std::size_t i = 0; i < entryCount; ++i) {
@@ -219,7 +185,103 @@ bool SnapshotPersistence::load(DataStore& store) const {
         entries.push_back(std::move(entry));
     }
 
-    store.loadSnapshot(entries);
+    return true;
+}
+
+} // namespace
+
+SnapshotPersistence::SnapshotPersistence(std::string path) : path_(std::move(path)) {}
+
+bool SnapshotPersistence::save(DataStore& store) const {
+    std::deque<DataStore> stores;
+    stores.emplace_back();
+    stores[0].loadSnapshot(store.snapshot());
+    return save(stores);
+}
+
+bool SnapshotPersistence::save(std::deque<DataStore>& stores) const {
+    const auto parent = std::filesystem::path(path_).parent_path();
+    if (!parent.empty()) {
+        std::filesystem::create_directories(parent);
+    }
+
+    const auto tempPath = path_ + ".tmp";
+    std::ofstream output(tempPath, std::ios::binary | std::ios::trunc);
+    if (!output.is_open()) {
+        return false;
+    }
+
+    writeLine(output, kMultiDbMagic);
+    writeLine(output, std::to_string(stores.size()));
+
+    for (auto& store : stores) {
+        if (!writeEntries(output, store.snapshot())) {
+            return false;
+        }
+    }
+
+    output.flush();
+    if (!output.good()) {
+        return false;
+    }
+    output.close();
+
+    std::filesystem::rename(tempPath, path_);
+    return true;
+}
+
+bool SnapshotPersistence::load(DataStore& store) const {
+    std::deque<DataStore> stores(1);
+    const bool loaded = load(stores);
+    if (!loaded) {
+        return false;
+    }
+    store.loadSnapshot(stores[0].snapshot());
+    return true;
+}
+
+bool SnapshotPersistence::load(std::deque<DataStore>& stores) const {
+    std::ifstream input(path_, std::ios::binary);
+    if (!input.is_open()) {
+        return true;
+    }
+
+    std::string magic;
+    if (!readLine(input, magic) || (magic != kMagic && magic != kMultiDbMagic)) {
+        std::cerr << "invalid snapshot file: " << path_ << "\n";
+        return false;
+    }
+
+    if (magic == kMagic) {
+        std::vector<SnapshotEntry> entries;
+        if (!readEntries(input, entries)) {
+            return false;
+        }
+        stores[0].loadSnapshot(entries);
+        for (std::size_t i = 1; i < stores.size(); ++i) {
+            stores[i].flushdb();
+        }
+        return true;
+    }
+
+    std::size_t databaseCount = 0;
+    if (!readSize(input, databaseCount)) {
+        return false;
+    }
+
+    std::vector<SnapshotEntry> entries;
+    for (std::size_t i = 0; i < databaseCount; ++i) {
+        if (!readEntries(input, entries)) {
+            return false;
+        }
+        if (i < stores.size()) {
+            stores[i].loadSnapshot(entries);
+        }
+    }
+
+    for (std::size_t i = databaseCount; i < stores.size(); ++i) {
+        stores[i].flushdb();
+    }
     return true;
 }
 

@@ -7,7 +7,14 @@ namespace swiftcache {
 SnapshotWorker::SnapshotWorker(DataStore& store, SnapshotPersistence& snapshot,
                                AofPersistence* aof, ServerMetrics* metrics,
                                std::chrono::seconds interval)
-    : store_(store), snapshot_(snapshot), aof_(aof), metrics_(metrics), interval_(interval) {}
+    : store_(&store), stores_(nullptr), snapshot_(snapshot), aof_(aof), metrics_(metrics),
+      interval_(interval) {}
+
+SnapshotWorker::SnapshotWorker(std::deque<DataStore>& stores, SnapshotPersistence& snapshot,
+                               AofPersistence* aof, ServerMetrics* metrics,
+                               std::chrono::seconds interval)
+    : store_(nullptr), stores_(&stores), snapshot_(snapshot), aof_(aof), metrics_(metrics),
+      interval_(interval) {}
 
 SnapshotWorker::~SnapshotWorker() {
     stop();
@@ -41,11 +48,10 @@ void SnapshotWorker::run() {
         }
         lock.unlock();
 
-        const bool saved = aof_ == nullptr
-            ? snapshot_.save(store_)
-            : aof_->checkpoint([this]() {
-                return snapshot_.save(store_);
-            });
+        const auto saveSnapshot = [this]() {
+            return stores_ == nullptr ? snapshot_.save(*store_) : snapshot_.save(*stores_);
+        };
+        const bool saved = aof_ == nullptr ? saveSnapshot() : aof_->checkpoint(saveSnapshot);
         if (!saved) {
             std::cerr << "failed to write SwiftCache snapshot\n";
         } else if (metrics_ != nullptr) {

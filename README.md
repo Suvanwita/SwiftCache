@@ -2,14 +2,14 @@
 
 SwiftCache is a Redis-inspired in-memory datastore written in C++17. 
 
-The current implementation supports strings, lists, hashes, sets, TTL, automatic expiration, snapshot persistence, append-only file persistence, basic server metrics, Pub/Sub messaging, inline text commands, RESP requests, and multiple threaded TCP clients on a configurable TCP host/port.
+The current implementation supports strings, lists, hashes, sets, logical databases, TTL, automatic expiration, snapshot persistence, append-only file persistence, basic server metrics, Pub/Sub messaging, inline text commands, RESP requests, and multiple threaded TCP clients on a configurable TCP host/port.
 
 
 ## Features
 
 - C++17 implementation
 - TCP socket server on `localhost:6379`
-- Configurable bind host, port, persistence paths, persistence modes, and eviction policy
+- Configurable bind host, port, logical database count, persistence paths, persistence modes, and eviction policy
 - Inline text protocol for manual `telnet`/`nc` usage
 - RESP array/bulk-string request parsing for Redis-style clients
 - Multiple threaded client connections
@@ -25,6 +25,7 @@ The current implementation supports strings, lists, hashes, sets, TTL, automatic
 - Optional key-count and estimated-memory eviction limits
 - Eviction policies: `allkeys-lru`, `volatile-lru`, `ttl-priority`, and `random`
 - Keyspace inspection with `KEYS`, `TYPE`, `SCAN`, `RENAME`, and `FLUSHDB`
+- Connection-local logical database selection with `SELECT`
 - Expanded server, persistence, and datastore metrics through `INFO`
 - CMake and Makefile build support
 - Unit tests for core command behavior
@@ -65,7 +66,7 @@ swiftcache/
 
 The datastore uses `ValueObject` with typed payloads for strings, lists, hashes, and sets. All datastore operations are protected by a mutex, and expiration is enforced both lazily during access and actively by the expiry worker.
 
-SwiftCache loads `storage/swiftcache.snapshot` first, then replays the remaining commands from `storage/swiftcache.aof` before accepting clients. Mutating commands are executed and appended under the same persistence lock, so periodic snapshots can safely compact the AOF without losing or duplicating writes.
+SwiftCache loads `storage/swiftcache.snapshot` first, then replays the remaining commands from `storage/swiftcache.aof` before accepting clients. Snapshots store every configured logical database, and AOF replay restores writes into their selected database. Mutating commands are executed and appended under the same persistence lock, so periodic snapshots can safely compact the AOF without losing or duplicating writes.
 
 ## Requirements
 
@@ -97,6 +98,12 @@ Run with custom server and persistence settings:
 
 ```sh
 ./SwiftCache --host 0.0.0.0 --port 6380 --aof storage/dev.aof --snapshot storage/dev.snapshot
+```
+
+Run with a custom number of logical databases:
+
+```sh
+./SwiftCache --databases 32
 ```
 
 Disable persistence modes when you want a purely in-memory development server:
@@ -137,6 +144,7 @@ SwiftCache can be configured with CLI arguments, a config file, or both. When bo
 | `--aof <path>` | Append-only file path. Defaults to `storage/swiftcache.aof`. |
 | `--snapshot <path>` | Snapshot file path. Defaults to `storage/swiftcache.snapshot`. |
 | `--config <path>` | Loads a key/value config file before applying CLI overrides. |
+| `--databases <count>` | Number of logical databases. Defaults to `16`. |
 | `--max-keys <count>` | Evicts keys when the datastore grows above this key count. `0` disables the key-count limit. |
 | `--max-memory <bytes>` | Evicts keys when estimated stored data grows above this size. `0` disables the memory limit. |
 | `--eviction-policy <policy>` | Eviction policy. Supported values: `none`, `allkeys-lru`, `volatile-lru`, `ttl-priority`, `random`. |
@@ -155,6 +163,7 @@ aof=storage/swiftcache.aof
 snapshot=storage/swiftcache.snapshot
 aof_enabled=true
 snapshot_enabled=true
+databases=16
 max_keys=0
 max_memory=0
 eviction_policy=none
@@ -239,7 +248,7 @@ Snapshots are stored at:
 storage/swiftcache.snapshot
 ```
 
-The snapshot worker runs periodically while the server is active. It writes the full in-memory datastore to disk, including strings, lists, hashes, sets, creation timestamps, and TTL metadata. After a successful snapshot, SwiftCache truncates the AOF so the log only contains mutations that happened after the latest snapshot.
+The snapshot worker runs periodically while the server is active. It writes the full in-memory datastore for every logical database to disk, including strings, lists, hashes, sets, creation timestamps, and TTL metadata. After a successful snapshot, SwiftCache truncates the AOF so the log only contains mutations that happened after the latest snapshot.
 
 The AOF file is stored at:
 
@@ -256,10 +265,11 @@ Logged commands include writes and keyspace mutations such as:
 - `HSET`, `HDEL`
 - `SADD`, `SREM`
 - `RENAME`, `FLUSHDB`
+- `SELECT` markers when writes target a different logical database
 
 Read-only commands such as `GET`, `TTL`, `KEYS`, `INFO`, and `SMEMBERS` are not written to the AOF.
 
-On startup, SwiftCache restores the snapshot first and then replays the AOF delta. This gives the server faster recovery than replaying the entire command history every time.
+On startup, SwiftCache restores the snapshot first and then replays the AOF delta. `SELECT` markers in the AOF preserve which logical database each write targeted. This gives the server faster recovery than replaying the entire command history every time.
 
 To verify persistence:
 
@@ -310,6 +320,7 @@ Pub/Sub subscriptions are connection-local and are not persisted to snapshots or
 
 | Command | Description |
 | --- | --- |
+| `SELECT index` | Selects a logical database for the current connection. Defaults to database `0`. |
 | `DEL key` | Deletes a key. Returns `1` if removed, otherwise `0`. |
 | `EXISTS key` | Returns `1` if the key exists and is not expired, otherwise `0`. |
 | `KEYS [pattern]` | Returns keys matching a glob-style pattern. Defaults to `*`. |
@@ -425,6 +436,21 @@ OK
 FLUSHDB
 OK
 KEYS
+```
+
+```text
+SET shared zero
+OK
+SELECT 1
+OK
+SET shared one
+OK
+GET shared
+one
+SELECT 0
+OK
+GET shared
+zero
 ```
 
 ### Strings

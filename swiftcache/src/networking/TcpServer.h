@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <deque>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -21,6 +22,9 @@ public:
     TcpServer(std::string host, std::uint16_t port, DataStore& store,
               const CommandRegistry& registry, ServerMetrics& metrics,
               AofPersistence* aof = nullptr);
+    TcpServer(std::string host, std::uint16_t port, std::deque<DataStore>& stores,
+              const CommandRegistry& registry, ServerMetrics& metrics,
+              AofPersistence* aof = nullptr);
 
     bool start();
     void stop();
@@ -29,6 +33,9 @@ private:
     void acceptLoop();
     void handleClient(int clientFd) const;
     bool sendResponse(int clientFd, const std::string& response) const;
+    bool handleSelectCommand(int clientFd, const ParsedCommand& command,
+                             const std::vector<std::string>& tokens,
+                             std::size_t& databaseIndex) const;
     bool handlePubSubCommand(int clientFd, const ParsedCommand& command,
                              const std::vector<std::string>& tokens) const;
     std::string subscribe(int clientFd, RequestProtocol protocol,
@@ -41,7 +48,8 @@ private:
 
     std::string host_;
     std::uint16_t port_;
-    DataStore& store_;
+    DataStore* store_;
+    std::deque<DataStore>* stores_;
     const CommandRegistry& registry_;
     ServerMetrics& metrics_;
     AofPersistence* aof_;

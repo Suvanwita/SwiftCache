@@ -1,5 +1,6 @@
 #include <cassert>
 #include <chrono>
+#include <deque>
 #include <filesystem>
 #include <string>
 #include <thread>
@@ -180,6 +181,22 @@ int main() {
     assert(std::stoll(run(registry, replayedStore, {"TTL", "persisted:string"}).response) > 0);
     std::filesystem::remove(aofPath);
 
+    const std::string multiDbAofPath = "/tmp/swiftcache-command-tests-multidb.aof";
+    std::filesystem::remove(multiDbAofPath);
+    swiftcache::AofPersistence multiDbAof(multiDbAofPath);
+    assert(multiDbAof.append({"SET", "shared", "db0"}, 0));
+    assert(multiDbAof.append({"SET", "shared", "db1"}, 1));
+    assert(multiDbAof.append({"SADD", "tags", "isolated"}, 1));
+    assert(multiDbAof.append({"SET", "shared", "db0-again"}, 0));
+
+    std::deque<swiftcache::DataStore> replayedStores(2);
+    assert(multiDbAof.replay(registry, replayedStores));
+    assert(run(registry, replayedStores[0], {"GET", "shared"}).response == "db0-again\n");
+    assert(run(registry, replayedStores[0], {"SMEMBERS", "tags"}).response == "");
+    assert(run(registry, replayedStores[1], {"GET", "shared"}).response == "db1\n");
+    assert(run(registry, replayedStores[1], {"SMEMBERS", "tags"}).response == "isolated\n");
+    std::filesystem::remove(multiDbAofPath);
+
     const std::string snapshotPath = "/tmp/swiftcache-command-tests.snapshot";
     const std::string checkpointAofPath = "/tmp/swiftcache-command-tests-checkpoint.aof";
     std::filesystem::remove(snapshotPath);
@@ -200,6 +217,16 @@ int main() {
     assert(run(registry, loadedSnapshotStore, {"LRANGE", "snap:list", "0", "-1"}).response == "a\nb\n");
     assert(run(registry, loadedSnapshotStore, {"HGET", "snap:hash", "field"}).response == "value\n");
     assert(run(registry, loadedSnapshotStore, {"SMEMBERS", "snap:set"}).response == "one\ntwo\n");
+
+    std::deque<swiftcache::DataStore> snapshotStores(2);
+    assert(run(registry, snapshotStores[0], {"SET", "shared", "db0"}).response == "OK\n");
+    assert(run(registry, snapshotStores[1], {"SET", "shared", "db1"}).response == "OK\n");
+    assert(snapshot.save(snapshotStores));
+
+    std::deque<swiftcache::DataStore> loadedSnapshotStores(2);
+    assert(snapshot.load(loadedSnapshotStores));
+    assert(run(registry, loadedSnapshotStores[0], {"GET", "shared"}).response == "db0\n");
+    assert(run(registry, loadedSnapshotStores[1], {"GET", "shared"}).response == "db1\n");
 
     swiftcache::AofPersistence checkpointAof(checkpointAofPath);
     assert(checkpointAof.append({"SET", "delta", "value"}));

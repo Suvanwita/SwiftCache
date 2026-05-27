@@ -1,7 +1,10 @@
 #pragma once
 
-#include <functional>
+#include <cstddef>
 #include <cstdint>
+#include <deque>
+#include <functional>
+#include <iosfwd>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -17,8 +20,10 @@ public:
     explicit AofPersistence(std::string path);
 
     bool replay(const CommandRegistry& registry, DataStore& store) const;
-    bool append(const std::vector<std::string>& tokens);
+    bool replay(const CommandRegistry& registry, std::deque<DataStore>& stores) const;
+    bool append(const std::vector<std::string>& tokens, std::size_t databaseIndex = 0);
     CommandResult executeAndAppend(const std::vector<std::string>& tokens,
+                                   std::size_t databaseIndex,
                                    const std::function<CommandResult()>& execute,
                                    bool& appendSucceeded);
     bool checkpoint(const std::function<bool()>& saveSnapshot);
@@ -29,9 +34,12 @@ public:
 
 private:
     static std::string encodeRespCommand(const std::vector<std::string>& tokens);
+    bool writeCommand(std::ofstream& output, const std::vector<std::string>& tokens,
+                      std::size_t databaseIndex);
 
     std::string path_;
     mutable std::mutex mutex_;
+    std::size_t currentAppendDatabase_{0};
 };
 
 } // namespace swiftcache

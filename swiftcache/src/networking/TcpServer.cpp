@@ -3,6 +3,7 @@
 #include <arpa/inet.h>
 #include <cerrno>
 #include <cctype>
+#include <cstddef>
 #include <cstring>
 #include <iostream>
 #include <netinet/in.h>
@@ -152,13 +153,38 @@ bool resolveHost(const std::string& host, in_addr& address) {
     return inet_pton(AF_INET, host.c_str(), &address) == 1;
 }
 
+bool parseDatabaseIndex(const std::string& raw, std::size_t databaseCount,
+                        std::size_t& databaseIndex) {
+    if (raw.empty() || raw.front() == '-') {
+        return false;
+    }
+
+    try {
+        std::size_t consumed = 0;
+        const auto parsed = std::stoull(raw, &consumed);
+        if (consumed != raw.size() || parsed >= databaseCount) {
+            return false;
+        }
+        databaseIndex = static_cast<std::size_t>(parsed);
+        return true;
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
 } // namespace
 
 TcpServer::TcpServer(std::string host, std::uint16_t port, DataStore& store,
                      const CommandRegistry& registry, ServerMetrics& metrics,
                      AofPersistence* aof)
-    : host_(std::move(host)), port_(port), store_(store), registry_(registry), metrics_(metrics),
-      aof_(aof) {}
+    : host_(std::move(host)), port_(port), store_(&store), stores_(nullptr), registry_(registry),
+      metrics_(metrics), aof_(aof) {}
+
+TcpServer::TcpServer(std::string host, std::uint16_t port, std::deque<DataStore>& stores,
+                     const CommandRegistry& registry, ServerMetrics& metrics,
+                     AofPersistence* aof)
+    : host_(std::move(host)), port_(port), store_(nullptr), stores_(&stores), registry_(registry),
+      metrics_(metrics), aof_(aof) {}
 
 bool TcpServer::start() {
     serverFd_ = socket(AF_INET, SOCK_STREAM, 0);
@@ -230,6 +256,7 @@ void TcpServer::acceptLoop() {
 void TcpServer::handleClient(int clientFd) const {
     metrics_.clientConnected();
     bool greetingSent = false;
+    std::size_t databaseIndex = 0;
 
     std::string pending;
     char buffer[kBufferSize];
@@ -261,15 +288,19 @@ void TcpServer::handleClient(int clientFd) const {
 
             if (!command.tokens.empty()) {
                 metrics_.commandExecuted(toUpper(command.tokens.front()));
+                if (handleSelectCommand(clientFd, command, command.tokens, databaseIndex)) {
+                    continue;
+                }
                 if (handlePubSubCommand(clientFd, command, command.tokens)) {
                     continue;
                 }
 
                 bool appendSucceeded = true;
+                DataStore& selectedStore = stores_ == nullptr ? *store_ : (*stores_)[databaseIndex];
                 const auto result = aof_ == nullptr
-                    ? registry_.execute(command.tokens, store_)
-                    : aof_->executeAndAppend(command.tokens, [this, &command]() {
-                        return registry_.execute(command.tokens, store_);
+                    ? registry_.execute(command.tokens, selectedStore)
+                    : aof_->executeAndAppend(command.tokens, databaseIndex, [this, &command, &selectedStore]() {
+                        return registry_.execute(command.tokens, selectedStore);
                     }, appendSucceeded);
                 if (!appendSucceeded && isSuccessfulResponse(result.response)) {
                     std::cerr << "failed to append command to AOF\n";
@@ -293,6 +324,37 @@ void TcpServer::handleClient(int clientFd) const {
     removeClientSubscriptions(clientFd);
     closeIfOpen(clientFd);
     metrics_.clientDisconnected();
+}
+
+bool TcpServer::handleSelectCommand(int clientFd, const ParsedCommand& command,
+                                    const std::vector<std::string>& tokens,
+                                    std::size_t& databaseIndex) const {
+    if (toUpper(tokens.front()) != "SELECT") {
+        return false;
+    }
+
+    std::string response;
+    if (tokens.size() != 2) {
+        response = "ERR wrong number of arguments for SELECT\n";
+    } else {
+        const std::size_t databaseCount = stores_ == nullptr ? 1 : stores_->size();
+        std::size_t selected = 0;
+        if (!parseDatabaseIndex(tokens[1], databaseCount, selected)) {
+            response = "ERR DB index is out of range\n";
+        } else {
+            databaseIndex = selected;
+            response = "OK\n";
+        }
+    }
+
+    if (isRejectedResponse(response)) {
+        metrics_.commandRejected();
+    }
+    if (command.protocol == RequestProtocol::Resp) {
+        response = formatRespResponse(response);
+    }
+    sendResponse(clientFd, response);
+    return true;
 }
 
 bool TcpServer::sendResponse(int clientFd, const std::string& response) const {

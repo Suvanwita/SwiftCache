@@ -1,5 +1,6 @@
 #pragma once
 
+#include <deque>
 #include <string>
 
 #include "../datastore/DataStore.h"
@@ -11,7 +12,9 @@ public:
     explicit SnapshotPersistence(std::string path);
 
     bool save(DataStore& store) const;
+    bool save(std::deque<DataStore>& stores) const;
     bool load(DataStore& store) const;
+    bool load(std::deque<DataStore>& stores) const;
 
     const std::string& path() const;
 

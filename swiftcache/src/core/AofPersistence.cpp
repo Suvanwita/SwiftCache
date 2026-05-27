@@ -1,6 +1,7 @@
 #include "AofPersistence.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -26,6 +27,16 @@ const std::unordered_set<std::string> kMutatingCommands{
 AofPersistence::AofPersistence(std::string path) : path_(std::move(path)) {}
 
 bool AofPersistence::replay(const CommandRegistry& registry, DataStore& store) const {
+    std::deque<DataStore> stores(1);
+    const bool replayed = replay(registry, stores);
+    if (!replayed) {
+        return false;
+    }
+    store.loadSnapshot(stores[0].snapshot());
+    return true;
+}
+
+bool AofPersistence::replay(const CommandRegistry& registry, std::deque<DataStore>& stores) const {
     std::ifstream input(path_, std::ios::binary);
     if (!input.is_open()) {
         return true;
@@ -34,12 +45,36 @@ bool AofPersistence::replay(const CommandRegistry& registry, DataStore& store) c
     std::string buffer((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
     CommandParser parser;
     const auto commands = parser.parseAvailable(buffer);
+    std::size_t databaseIndex = 0;
 
     for (const auto& command : commands) {
         if (command.tokens.empty()) {
             continue;
         }
-        const auto result = registry.execute(command.tokens, store);
+
+        const auto commandName = toUpper(command.tokens.front());
+        if (commandName == "SELECT") {
+            if (command.tokens.size() != 2) {
+                std::cerr << "AOF replay skipped invalid SELECT command\n";
+                continue;
+            }
+
+            try {
+                std::size_t consumed = 0;
+                const auto parsed = std::stoull(command.tokens[1], &consumed);
+                if (consumed != command.tokens[1].size() || parsed >= stores.size()) {
+                    std::cerr << "AOF replay skipped out-of-range SELECT DB: "
+                              << command.tokens[1] << "\n";
+                    continue;
+                }
+                databaseIndex = static_cast<std::size_t>(parsed);
+            } catch (const std::exception&) {
+                std::cerr << "AOF replay skipped invalid SELECT DB: " << command.tokens[1] << "\n";
+            }
+            continue;
+        }
+
+        const auto result = registry.execute(command.tokens, stores[databaseIndex]);
         if (result.response.rfind("ERR ", 0) == 0) {
             std::cerr << "AOF replay skipped failed command: " << result.response;
         }
@@ -52,7 +87,7 @@ bool AofPersistence::replay(const CommandRegistry& registry, DataStore& store) c
     return true;
 }
 
-bool AofPersistence::append(const std::vector<std::string>& tokens) {
+bool AofPersistence::append(const std::vector<std::string>& tokens, std::size_t databaseIndex) {
     if (!isMutatingCommand(tokens)) {
         return true;
     }
@@ -68,12 +103,15 @@ bool AofPersistence::append(const std::vector<std::string>& tokens) {
         return false;
     }
 
-    output << encodeRespCommand(tokens);
+    if (!writeCommand(output, tokens, databaseIndex)) {
+        return false;
+    }
     output.flush();
     return output.good();
 }
 
 CommandResult AofPersistence::executeAndAppend(const std::vector<std::string>& tokens,
+                                               std::size_t databaseIndex,
                                                const std::function<CommandResult()>& execute,
                                                bool& appendSucceeded) {
     appendSucceeded = true;
@@ -98,9 +136,9 @@ CommandResult AofPersistence::executeAndAppend(const std::vector<std::string>& t
         return result;
     }
 
-    output << encodeRespCommand(tokens);
+    appendSucceeded = writeCommand(output, tokens, databaseIndex);
     output.flush();
-    appendSucceeded = output.good();
+    appendSucceeded = appendSucceeded && output.good();
     return result;
 }
 
@@ -116,6 +154,7 @@ bool AofPersistence::checkpoint(const std::function<bool()>& saveSnapshot) {
     }
 
     std::ofstream output(path_, std::ios::binary | std::ios::trunc);
+    currentAppendDatabase_ = 0;
     return output.good();
 }
 
@@ -145,6 +184,16 @@ std::string AofPersistence::encodeRespCommand(const std::vector<std::string>& to
         encoded += "\r\n";
     }
     return encoded;
+}
+
+bool AofPersistence::writeCommand(std::ofstream& output, const std::vector<std::string>& tokens,
+                                  std::size_t databaseIndex) {
+    if (databaseIndex != currentAppendDatabase_) {
+        output << encodeRespCommand({"SELECT", std::to_string(databaseIndex)});
+        currentAppendDatabase_ = databaseIndex;
+    }
+    output << encodeRespCommand(tokens);
+    return output.good();
 }
 
 } // namespace swiftcache

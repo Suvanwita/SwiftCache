@@ -3,6 +3,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <deque>
 #include <mutex>
 #include <thread>
 
@@ -18,6 +19,9 @@ public:
     SnapshotWorker(DataStore& store, SnapshotPersistence& snapshot, AofPersistence* aof,
                    ServerMetrics* metrics = nullptr,
                    std::chrono::seconds interval = std::chrono::seconds(30));
+    SnapshotWorker(std::deque<DataStore>& stores, SnapshotPersistence& snapshot,
+                   AofPersistence* aof, ServerMetrics* metrics = nullptr,
+                   std::chrono::seconds interval = std::chrono::seconds(30));
     ~SnapshotWorker();
 
     SnapshotWorker(const SnapshotWorker&) = delete;
@@ -29,7 +33,8 @@ public:
 private:
     void run();
 
-    DataStore& store_;
+    DataStore* store_;
+    std::deque<DataStore>* stores_;
     SnapshotPersistence& snapshot_;
     AofPersistence* aof_;
     ServerMetrics* metrics_;

@@ -4,7 +4,9 @@
 
 namespace swiftcache {
 
-ExpiryWorker::ExpiryWorker(DataStore& store) : store_(store) {}
+ExpiryWorker::ExpiryWorker(DataStore& store) : store_(&store), stores_(nullptr) {}
+
+ExpiryWorker::ExpiryWorker(std::deque<DataStore>& stores) : store_(nullptr), stores_(&stores) {}
 
 ExpiryWorker::~ExpiryWorker() {
     stop();
@@ -29,7 +31,13 @@ void ExpiryWorker::stop() {
 void ExpiryWorker::run() {
     while (running_.load()) {
         std::this_thread::sleep_for(std::chrono::seconds(1));
-        store_.removeExpired();
+        if (stores_ != nullptr) {
+            for (auto& store : *stores_) {
+                store.removeExpired();
+            }
+        } else {
+            store_->removeExpired();
+        }
     }
 }
 
