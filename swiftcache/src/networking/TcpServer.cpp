@@ -69,7 +69,7 @@ std::string formatRespArray(const std::vector<std::string>& values) {
 std::string formatRespResponse(const std::string& response) {
     const std::string trimmed = trimTrailingNewline(response);
 
-    if (trimmed.rfind("ERR ", 0) == 0) {
+    if (trimmed.rfind("ERR ", 0) == 0 || trimmed.rfind("NOAUTH ", 0) == 0) {
         return "-" + trimmed + "\r\n";
     }
     if (trimmed == "OK" || trimmed == "PONG") {
@@ -176,15 +176,15 @@ bool parseDatabaseIndex(const std::string& raw, std::size_t databaseCount,
 
 TcpServer::TcpServer(std::string host, std::uint16_t port, DataStore& store,
                      const CommandRegistry& registry, ServerMetrics& metrics,
-                     AofPersistence* aof)
+                     AofPersistence* aof, std::string authPassword)
     : host_(std::move(host)), port_(port), store_(&store), stores_(nullptr), registry_(registry),
-      metrics_(metrics), aof_(aof) {}
+      metrics_(metrics), aof_(aof), authPassword_(std::move(authPassword)) {}
 
 TcpServer::TcpServer(std::string host, std::uint16_t port, std::deque<DataStore>& stores,
                      const CommandRegistry& registry, ServerMetrics& metrics,
-                     AofPersistence* aof)
+                     AofPersistence* aof, std::string authPassword)
     : host_(std::move(host)), port_(port), store_(nullptr), stores_(&stores), registry_(registry),
-      metrics_(metrics), aof_(aof) {}
+      metrics_(metrics), aof_(aof), authPassword_(std::move(authPassword)) {}
 
 bool TcpServer::start() {
     serverFd_ = socket(AF_INET, SOCK_STREAM, 0);
@@ -256,6 +256,7 @@ void TcpServer::acceptLoop() {
 void TcpServer::handleClient(int clientFd) const {
     metrics_.clientConnected();
     bool greetingSent = false;
+    bool authenticated = authPassword_.empty();
     std::size_t databaseIndex = 0;
 
     std::string pending;
@@ -288,6 +289,13 @@ void TcpServer::handleClient(int clientFd) const {
 
             if (!command.tokens.empty()) {
                 metrics_.commandExecuted(toUpper(command.tokens.front()));
+                if (handleAuthCommand(clientFd, command, command.tokens, authenticated)) {
+                    continue;
+                }
+                if (!requireAuthenticatedClient(clientFd, command.protocol, authenticated)) {
+                    metrics_.commandRejected();
+                    continue;
+                }
                 if (handleSelectCommand(clientFd, command, command.tokens, databaseIndex)) {
                     continue;
                 }
@@ -324,6 +332,49 @@ void TcpServer::handleClient(int clientFd) const {
     removeClientSubscriptions(clientFd);
     closeIfOpen(clientFd);
     metrics_.clientDisconnected();
+}
+
+bool TcpServer::handleAuthCommand(int clientFd, const ParsedCommand& command,
+                                  const std::vector<std::string>& tokens,
+                                  bool& authenticated) const {
+    if (toUpper(tokens.front()) != "AUTH") {
+        return false;
+    }
+
+    std::string response;
+    if (authPassword_.empty()) {
+        response = "ERR AUTH called without any password configured\n";
+    } else if (tokens.size() != 2) {
+        response = "ERR wrong number of arguments for AUTH\n";
+    } else if (tokens[1] != authPassword_) {
+        response = "ERR invalid password\n";
+    } else {
+        authenticated = true;
+        response = "OK\n";
+    }
+
+    if (isRejectedResponse(response)) {
+        metrics_.commandRejected();
+    }
+    if (command.protocol == RequestProtocol::Resp) {
+        response = formatRespResponse(response);
+    }
+    sendResponse(clientFd, response);
+    return true;
+}
+
+bool TcpServer::requireAuthenticatedClient(int clientFd, RequestProtocol protocol,
+                                           bool authenticated) const {
+    if (authenticated) {
+        return true;
+    }
+
+    std::string response = "NOAUTH Authentication required\n";
+    if (protocol == RequestProtocol::Resp) {
+        response = formatRespResponse(response);
+    }
+    sendResponse(clientFd, response);
+    return false;
 }
 
 bool TcpServer::handleSelectCommand(int clientFd, const ParsedCommand& command,

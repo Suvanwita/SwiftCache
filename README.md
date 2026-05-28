@@ -2,14 +2,14 @@
 
 SwiftCache is a Redis-inspired in-memory datastore written in C++17. 
 
-The current implementation supports strings, lists, hashes, sets, logical databases, TTL, automatic expiration, snapshot persistence, append-only file persistence, basic server metrics, Pub/Sub messaging, inline text commands, RESP requests, and multiple threaded TCP clients on a configurable TCP host/port.
+The current implementation supports strings, lists, hashes, sets, logical databases, optional password authentication, TTL, automatic expiration, snapshot persistence, append-only file persistence, basic server metrics, Pub/Sub messaging, inline text commands, RESP requests, and multiple threaded TCP clients on a configurable TCP host/port.
 
 
 ## Features
 
 - C++17 implementation
 - TCP socket server on `localhost:6379`
-- Configurable bind host, port, logical database count, persistence paths, persistence modes, and eviction policy
+- Configurable bind host, port, password authentication, logical database count, persistence paths, persistence modes, and eviction policy
 - Inline text protocol for manual `telnet`/`nc` usage
 - RESP array/bulk-string request parsing for Redis-style clients
 - Multiple threaded client connections
@@ -26,6 +26,7 @@ The current implementation supports strings, lists, hashes, sets, logical databa
 - Eviction policies: `allkeys-lru`, `volatile-lru`, `ttl-priority`, and `random`
 - Keyspace inspection with `KEYS`, `TYPE`, `SCAN`, `RENAME`, and `FLUSHDB`
 - Connection-local logical database selection with `SELECT`
+- Optional password authentication with `AUTH`
 - Expanded server, persistence, and datastore metrics through `INFO`
 - CMake and Makefile build support
 - Unit tests for core command behavior
@@ -100,6 +101,12 @@ Run with custom server and persistence settings:
 ./SwiftCache --host 0.0.0.0 --port 6380 --aof storage/dev.aof --snapshot storage/dev.snapshot
 ```
 
+Run with password authentication enabled:
+
+```sh
+./SwiftCache --host 0.0.0.0 --requirepass strong-password
+```
+
 Run with a custom number of logical databases:
 
 ```sh
@@ -144,6 +151,7 @@ SwiftCache can be configured with CLI arguments, a config file, or both. When bo
 | `--aof <path>` | Append-only file path. Defaults to `storage/swiftcache.aof`. |
 | `--snapshot <path>` | Snapshot file path. Defaults to `storage/swiftcache.snapshot`. |
 | `--config <path>` | Loads a key/value config file before applying CLI overrides. |
+| `--requirepass <password>` | Requires clients to send `AUTH password` before other commands. Unset by default. |
 | `--databases <count>` | Number of logical databases. Defaults to `16`. |
 | `--max-keys <count>` | Evicts keys when the datastore grows above this key count. `0` disables the key-count limit. |
 | `--max-memory <bytes>` | Evicts keys when estimated stored data grows above this size. `0` disables the memory limit. |
@@ -163,6 +171,7 @@ aof=storage/swiftcache.aof
 snapshot=storage/swiftcache.snapshot
 aof_enabled=true
 snapshot_enabled=true
+requirepass=
 databases=16
 max_keys=0
 max_memory=0
@@ -208,6 +217,15 @@ Inline clients receive a greeting before the first inline command response:
 ```text
 Connected to SwiftCache
 ```
+
+If `--requirepass` or `requirepass` is configured, each client connection must authenticate before running commands:
+
+```text
+AUTH strong-password
+OK
+```
+
+Unauthenticated clients receive `NOAUTH Authentication required`. `AUTH` is connection-local and is not persisted.
 
 Commands are line-oriented and space-delimited:
 
@@ -303,6 +321,7 @@ Snapshot files are written through a temporary file and atomically renamed into 
 
 | Command | Description |
 | --- | --- |
+| `AUTH password` | Authenticates the current connection when password authentication is enabled. |
 | `PING` | Returns `PONG`. |
 | `INFO` | Returns server, persistence, command, client, and datastore metrics. |
 

@@ -42,6 +42,7 @@ struct ServerConfig {
     std::string snapshotPath{SWIFTCACHE_SNAPSHOT_PATH};
     bool aofEnabled{true};
     bool snapshotEnabled{true};
+    std::string authPassword;
     std::size_t databaseCount{16};
     swiftcache::EvictionConfig eviction;
 };
@@ -155,6 +156,10 @@ bool applyConfigOption(ServerConfig& config, const std::string& key, const std::
     }
     if (normalizedKey == "snapshot") {
         config.snapshotPath = normalizedValue;
+        return true;
+    }
+    if (normalizedKey == "requirepass" || normalizedKey == "password") {
+        config.authPassword = normalizedValue;
         return true;
     }
     if (normalizedKey == "aof_enabled" || normalizedKey == "appendonly") {
@@ -271,6 +276,7 @@ void printUsage() {
         << "  --aof <path>           Append-only file path.\n"
         << "  --snapshot <path>      Snapshot file path.\n"
         << "  --config <path>        Load key=value config before CLI overrides.\n"
+        << "  --requirepass <pass>   Require AUTH before clients can run commands.\n"
         << "  --databases <count>    Number of logical databases. Defaults to 16.\n"
         << "  --max-keys <count>     Evict keys above this key count. 0 disables.\n"
         << "  --max-memory <bytes>   Evict keys above this estimated memory. 0 disables.\n"
@@ -310,6 +316,8 @@ bool parseCommandLine(int argc, char* argv[], ServerConfig& config, bool& should
             config.snapshotPath = value;
         } else if (readValue("--config", value)) {
             continue;
+        } else if (readValue("--requirepass", value)) {
+            config.authPassword = value;
         } else if (readValue("--databases", value)) {
             if (!parseSize(value, config.databaseCount) || config.databaseCount == 0) {
                 std::cerr << "invalid --databases value: " << value << "\n";
@@ -397,7 +405,8 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    swiftcache::TcpServer server(config.host, config.port, stores, registry, metrics, aof.get());
+    swiftcache::TcpServer server(config.host, config.port, stores, registry, metrics, aof.get(),
+                                 config.authPassword);
     std::unique_ptr<swiftcache::SnapshotWorker> snapshotWorker;
     if (snapshot != nullptr) {
         snapshotWorker = std::make_unique<swiftcache::SnapshotWorker>(stores, *snapshot, aof.get(),

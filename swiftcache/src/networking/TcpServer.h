@@ -21,10 +21,10 @@ class TcpServer {
 public:
     TcpServer(std::string host, std::uint16_t port, DataStore& store,
               const CommandRegistry& registry, ServerMetrics& metrics,
-              AofPersistence* aof = nullptr);
+              AofPersistence* aof = nullptr, std::string authPassword = "");
     TcpServer(std::string host, std::uint16_t port, std::deque<DataStore>& stores,
               const CommandRegistry& registry, ServerMetrics& metrics,
-              AofPersistence* aof = nullptr);
+              AofPersistence* aof = nullptr, std::string authPassword = "");
 
     bool start();
     void stop();
@@ -33,6 +33,11 @@ private:
     void acceptLoop();
     void handleClient(int clientFd) const;
     bool sendResponse(int clientFd, const std::string& response) const;
+    bool handleAuthCommand(int clientFd, const ParsedCommand& command,
+                           const std::vector<std::string>& tokens,
+                           bool& authenticated) const;
+    bool requireAuthenticatedClient(int clientFd, RequestProtocol protocol,
+                                    bool authenticated) const;
     bool handleSelectCommand(int clientFd, const ParsedCommand& command,
                              const std::vector<std::string>& tokens,
                              std::size_t& databaseIndex) const;
@@ -53,6 +58,7 @@ private:
     const CommandRegistry& registry_;
     ServerMetrics& metrics_;
     AofPersistence* aof_;
+    std::string authPassword_;
     CommandParser parser_;
     int serverFd_{-1};
     std::atomic<bool> running_{false};
