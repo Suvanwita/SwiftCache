@@ -21,10 +21,12 @@ class TcpServer {
 public:
     TcpServer(std::string host, std::uint16_t port, DataStore& store,
               const CommandRegistry& registry, ServerMetrics& metrics,
-              AofPersistence* aof = nullptr, std::string authPassword = "");
+              AofPersistence* aof = nullptr, std::string authPassword = "",
+              bool readOnly = false);
     TcpServer(std::string host, std::uint16_t port, std::deque<DataStore>& stores,
               const CommandRegistry& registry, ServerMetrics& metrics,
-              AofPersistence* aof = nullptr, std::string authPassword = "");
+              AofPersistence* aof = nullptr, std::string authPassword = "",
+              bool readOnly = false);
 
     bool start();
     void stop();
@@ -38,6 +40,10 @@ private:
                            bool& authenticated) const;
     bool requireAuthenticatedClient(int clientFd, RequestProtocol protocol,
                                     bool authenticated) const;
+    bool handleReadOnlyCommand(int clientFd, const ParsedCommand& command,
+                               const std::vector<std::string>& tokens) const;
+    bool rejectReadOnlyWrite(int clientFd, const ParsedCommand& command,
+                             const std::vector<std::string>& tokens) const;
     bool handleSelectCommand(int clientFd, const ParsedCommand& command,
                              const std::vector<std::string>& tokens,
                              std::size_t& databaseIndex) const;
@@ -62,6 +68,7 @@ private:
     CommandParser parser_;
     int serverFd_{-1};
     std::atomic<bool> running_{false};
+    mutable std::atomic<bool> readOnly_{false};
     mutable std::mutex sendMutex_;
     mutable std::mutex pubsubMutex_;
     mutable std::unordered_map<std::string, std::unordered_map<int, RequestProtocol>> channelSubscribers_;

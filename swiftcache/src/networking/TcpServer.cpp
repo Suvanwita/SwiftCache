@@ -12,6 +12,7 @@
 #include <sys/socket.h>
 #include <sys/select.h>
 #include <thread>
+#include <unordered_set>
 #include <unistd.h>
 #include <utility>
 
@@ -172,19 +173,36 @@ bool parseDatabaseIndex(const std::string& raw, std::size_t databaseCount,
     }
 }
 
+bool isWriteCommand(const std::vector<std::string>& tokens) {
+    static const std::unordered_set<std::string> kWriteCommands{
+        "SET", "MSET", "DEL", "EXPIRE", "PERSIST",
+        "INCR", "DECR", "APPEND",
+        "LPUSH", "RPUSH", "LPOP", "RPOP",
+        "HSET", "HDEL",
+        "SADD", "SREM",
+        "RENAME", "FLUSHDB",
+        "PUBLISH"
+    };
+
+    if (tokens.empty()) {
+        return false;
+    }
+    return kWriteCommands.find(toUpper(tokens.front())) != kWriteCommands.end();
+}
+
 } // namespace
 
 TcpServer::TcpServer(std::string host, std::uint16_t port, DataStore& store,
                      const CommandRegistry& registry, ServerMetrics& metrics,
-                     AofPersistence* aof, std::string authPassword)
+                     AofPersistence* aof, std::string authPassword, bool readOnly)
     : host_(std::move(host)), port_(port), store_(&store), stores_(nullptr), registry_(registry),
-      metrics_(metrics), aof_(aof), authPassword_(std::move(authPassword)) {}
+      metrics_(metrics), aof_(aof), authPassword_(std::move(authPassword)), readOnly_(readOnly) {}
 
 TcpServer::TcpServer(std::string host, std::uint16_t port, std::deque<DataStore>& stores,
                      const CommandRegistry& registry, ServerMetrics& metrics,
-                     AofPersistence* aof, std::string authPassword)
+                     AofPersistence* aof, std::string authPassword, bool readOnly)
     : host_(std::move(host)), port_(port), store_(nullptr), stores_(&stores), registry_(registry),
-      metrics_(metrics), aof_(aof), authPassword_(std::move(authPassword)) {}
+      metrics_(metrics), aof_(aof), authPassword_(std::move(authPassword)), readOnly_(readOnly) {}
 
 bool TcpServer::start() {
     serverFd_ = socket(AF_INET, SOCK_STREAM, 0);
@@ -296,7 +314,14 @@ void TcpServer::handleClient(int clientFd) const {
                     metrics_.commandRejected();
                     continue;
                 }
+                if (handleReadOnlyCommand(clientFd, command, command.tokens)) {
+                    continue;
+                }
                 if (handleSelectCommand(clientFd, command, command.tokens, databaseIndex)) {
+                    continue;
+                }
+                if (rejectReadOnlyWrite(clientFd, command, command.tokens)) {
+                    metrics_.commandRejected();
                     continue;
                 }
                 if (handlePubSubCommand(clientFd, command, command.tokens)) {
@@ -375,6 +400,49 @@ bool TcpServer::requireAuthenticatedClient(int clientFd, RequestProtocol protoco
     }
     sendResponse(clientFd, response);
     return false;
+}
+
+bool TcpServer::handleReadOnlyCommand(int clientFd, const ParsedCommand& command,
+                                      const std::vector<std::string>& tokens) const {
+    if (toUpper(tokens.front()) != "READONLY") {
+        return false;
+    }
+
+    std::string response;
+    if (tokens.size() == 1) {
+        response = readOnly_.load() ? "1\n" : "0\n";
+    } else if (tokens.size() == 2 && toUpper(tokens[1]) == "ON") {
+        readOnly_.store(true);
+        response = "OK\n";
+    } else if (tokens.size() == 2 && toUpper(tokens[1]) == "OFF") {
+        readOnly_.store(false);
+        response = "OK\n";
+    } else {
+        response = "ERR usage: READONLY [ON|OFF]\n";
+    }
+
+    if (isRejectedResponse(response)) {
+        metrics_.commandRejected();
+    }
+    if (command.protocol == RequestProtocol::Resp) {
+        response = formatRespResponse(response);
+    }
+    sendResponse(clientFd, response);
+    return true;
+}
+
+bool TcpServer::rejectReadOnlyWrite(int clientFd, const ParsedCommand& command,
+                                    const std::vector<std::string>& tokens) const {
+    if (!readOnly_.load() || !isWriteCommand(tokens)) {
+        return false;
+    }
+
+    std::string response = "ERR server is read-only\n";
+    if (command.protocol == RequestProtocol::Resp) {
+        response = formatRespResponse(response);
+    }
+    sendResponse(clientFd, response);
+    return true;
 }
 
 bool TcpServer::handleSelectCommand(int clientFd, const ParsedCommand& command,

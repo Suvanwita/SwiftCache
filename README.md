@@ -2,14 +2,14 @@
 
 SwiftCache is a Redis-inspired in-memory datastore written in C++17. 
 
-The current implementation supports strings, lists, hashes, sets, logical databases, optional password authentication, TTL, automatic expiration, snapshot persistence, append-only file persistence, basic server metrics, Pub/Sub messaging, inline text commands, RESP requests, and multiple threaded TCP clients on a configurable TCP host/port.
+The current implementation supports strings, lists, hashes, sets, logical databases, optional password authentication, read-only mode, TTL, automatic expiration, snapshot persistence, append-only file persistence, basic server metrics, Pub/Sub messaging, inline text commands, RESP requests, and multiple threaded TCP clients on a configurable TCP host/port.
 
 
 ## Features
 
 - C++17 implementation
 - TCP socket server on `localhost:6379`
-- Configurable bind host, port, password authentication, logical database count, persistence paths, persistence modes, and eviction policy
+- Configurable bind host, port, password authentication, read-only mode, logical database count, persistence paths, persistence modes, and eviction policy
 - Inline text protocol for manual `telnet`/`nc` usage
 - RESP array/bulk-string request parsing for Redis-style clients
 - Multiple threaded client connections
@@ -27,6 +27,7 @@ The current implementation supports strings, lists, hashes, sets, logical databa
 - Keyspace inspection with `KEYS`, `TYPE`, `SCAN`, `RENAME`, and `FLUSHDB`
 - Connection-local logical database selection with `SELECT`
 - Optional password authentication with `AUTH`
+- Configurable and runtime-switchable read-only mode with `READONLY`
 - Expanded server, persistence, and datastore metrics through `INFO`
 - CMake and Makefile build support
 - Unit tests for core command behavior
@@ -107,6 +108,12 @@ Run with password authentication enabled:
 ./SwiftCache --host 0.0.0.0 --requirepass strong-password
 ```
 
+Run in read-only mode for maintenance:
+
+```sh
+./SwiftCache --readonly
+```
+
 Run with a custom number of logical databases:
 
 ```sh
@@ -152,6 +159,7 @@ SwiftCache can be configured with CLI arguments, a config file, or both. When bo
 | `--snapshot <path>` | Snapshot file path. Defaults to `storage/swiftcache.snapshot`. |
 | `--config <path>` | Loads a key/value config file before applying CLI overrides. |
 | `--requirepass <password>` | Requires clients to send `AUTH password` before other commands. Unset by default. |
+| `--readonly` | Starts the server in read-only mode. |
 | `--databases <count>` | Number of logical databases. Defaults to `16`. |
 | `--max-keys <count>` | Evicts keys when the datastore grows above this key count. `0` disables the key-count limit. |
 | `--max-memory <bytes>` | Evicts keys when estimated stored data grows above this size. `0` disables the memory limit. |
@@ -172,6 +180,7 @@ snapshot=storage/swiftcache.snapshot
 aof_enabled=true
 snapshot_enabled=true
 requirepass=
+readonly=false
 databases=16
 max_keys=0
 max_memory=0
@@ -226,6 +235,8 @@ OK
 ```
 
 Unauthenticated clients receive `NOAUTH Authentication required`. `AUTH` is connection-local and is not persisted.
+
+When read-only mode is active, write commands are rejected with `ERR server is read-only`. Reads, `AUTH`, `SELECT`, `SUBSCRIBE`, `UNSUBSCRIBE`, and `READONLY` remain available. `PUBLISH` is rejected because it produces a runtime side effect.
 
 Commands are line-oriented and space-delimited:
 
@@ -324,6 +335,7 @@ Snapshot files are written through a temporary file and atomically renamed into 
 | `AUTH password` | Authenticates the current connection when password authentication is enabled. |
 | `PING` | Returns `PONG`. |
 | `INFO` | Returns server, persistence, command, client, and datastore metrics. |
+| `READONLY [ON\|OFF]` | Returns read-only status as `1` or `0`, or toggles read-only mode at runtime. |
 
 ### Pub/Sub Commands
 
