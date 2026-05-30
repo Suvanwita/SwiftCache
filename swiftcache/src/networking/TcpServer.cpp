@@ -194,15 +194,19 @@ bool isWriteCommand(const std::vector<std::string>& tokens) {
 
 TcpServer::TcpServer(std::string host, std::uint16_t port, DataStore& store,
                      const CommandRegistry& registry, ServerMetrics& metrics,
-                     AofPersistence* aof, std::string authPassword, bool readOnly)
+                     AofPersistence* aof, std::string authPassword, bool readOnly,
+                     SnapshotPersistence* snapshot)
     : host_(std::move(host)), port_(port), store_(&store), stores_(nullptr), registry_(registry),
-      metrics_(metrics), aof_(aof), authPassword_(std::move(authPassword)), readOnly_(readOnly) {}
+      metrics_(metrics), aof_(aof), snapshot_(snapshot), authPassword_(std::move(authPassword)),
+      readOnly_(readOnly) {}
 
 TcpServer::TcpServer(std::string host, std::uint16_t port, std::deque<DataStore>& stores,
                      const CommandRegistry& registry, ServerMetrics& metrics,
-                     AofPersistence* aof, std::string authPassword, bool readOnly)
+                     AofPersistence* aof, std::string authPassword, bool readOnly,
+                     SnapshotPersistence* snapshot)
     : host_(std::move(host)), port_(port), store_(nullptr), stores_(&stores), registry_(registry),
-      metrics_(metrics), aof_(aof), authPassword_(std::move(authPassword)), readOnly_(readOnly) {}
+      metrics_(metrics), aof_(aof), snapshot_(snapshot), authPassword_(std::move(authPassword)),
+      readOnly_(readOnly) {}
 
 bool TcpServer::start() {
     serverFd_ = socket(AF_INET, SOCK_STREAM, 0);
@@ -317,6 +321,9 @@ void TcpServer::handleClient(int clientFd) const {
                 if (handleReadOnlyCommand(clientFd, command, command.tokens)) {
                     continue;
                 }
+                if (handlePersistenceCommand(clientFd, command, command.tokens)) {
+                    continue;
+                }
                 if (handleSelectCommand(clientFd, command, command.tokens, databaseIndex)) {
                     continue;
                 }
@@ -425,6 +432,47 @@ bool TcpServer::handleReadOnlyCommand(int clientFd, const ParsedCommand& command
         response = "OK\n";
     } else {
         response = "ERR usage: READONLY [ON|OFF]\n";
+    }
+
+    if (isRejectedResponse(response)) {
+        metrics_.commandRejected();
+    }
+    if (command.protocol == RequestProtocol::Resp) {
+        response = formatRespResponse(response);
+    }
+    sendResponse(clientFd, response);
+    return true;
+}
+
+bool TcpServer::handlePersistenceCommand(int clientFd, const ParsedCommand& command,
+                                         const std::vector<std::string>& tokens) const {
+    const auto commandName = toUpper(tokens.front());
+    if (commandName != "SAVE" && commandName != "LASTSAVE") {
+        return false;
+    }
+
+    std::string response;
+    if (commandName == "LASTSAVE") {
+        if (tokens.size() != 1) {
+            response = "ERR wrong number of arguments for LASTSAVE\n";
+        } else {
+            response = std::to_string(metrics_.lastSnapshotUnixSeconds()) + "\n";
+        }
+    } else if (tokens.size() != 1) {
+        response = "ERR wrong number of arguments for SAVE\n";
+    } else if (snapshot_ == nullptr) {
+        response = "ERR snapshot persistence is disabled\n";
+    } else {
+        const auto saveSnapshot = [this]() {
+            return stores_ == nullptr ? snapshot_->save(*store_) : snapshot_->save(*stores_);
+        };
+        const bool saved = aof_ == nullptr ? saveSnapshot() : aof_->checkpoint(saveSnapshot);
+        if (saved) {
+            metrics_.snapshotSaved();
+            response = "OK\n";
+        } else {
+            response = "ERR failed to save snapshot\n";
+        }
     }
 
     if (isRejectedResponse(response)) {

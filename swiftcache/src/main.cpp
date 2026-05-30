@@ -417,7 +417,7 @@ int main(int argc, char* argv[]) {
     }
 
     swiftcache::TcpServer server(config.host, config.port, stores, registry, metrics, aof.get(),
-                                 config.authPassword, config.readOnly);
+                                 config.authPassword, config.readOnly, snapshot.get());
     std::unique_ptr<swiftcache::SnapshotWorker> snapshotWorker;
     if (snapshot != nullptr) {
         snapshotWorker = std::make_unique<swiftcache::SnapshotWorker>(stores, *snapshot, aof.get(),

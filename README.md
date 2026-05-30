@@ -279,6 +279,8 @@ storage/swiftcache.snapshot
 
 The snapshot worker runs periodically while the server is active. It writes the full in-memory datastore for every logical database to disk, including strings, lists, hashes, sets, creation timestamps, and TTL metadata. After a successful snapshot, SwiftCache truncates the AOF so the log only contains mutations that happened after the latest snapshot.
 
+Use `SAVE` to trigger the same snapshot/checkpoint flow manually. `LASTSAVE` returns the Unix timestamp of the most recent successful background or manual snapshot, or `0` if no snapshot has completed.
+
 The AOF file is stored at:
 
 ```text
@@ -336,6 +338,8 @@ Snapshot files are written through a temporary file and atomically renamed into 
 | `PING` | Returns `PONG`. |
 | `INFO` | Returns server, persistence, command, client, and datastore metrics. |
 | `READONLY [ON\|OFF]` | Returns read-only status as `1` or `0`, or toggles read-only mode at runtime. |
+| `SAVE` | Writes a foreground snapshot immediately and checkpoints the AOF when enabled. |
+| `LASTSAVE` | Returns the Unix timestamp of the last successful snapshot, or `0` if none has completed. |
 
 ### Pub/Sub Commands
 
@@ -440,6 +444,15 @@ INFO
  },
  uptimeSeconds: 4
 }
+```
+
+```text
+LASTSAVE
+0
+SAVE
+OK
+LASTSAVE
+1717000000
 ```
 
 ```text

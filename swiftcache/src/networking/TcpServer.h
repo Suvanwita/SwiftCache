@@ -12,6 +12,7 @@
 #include "../core/AofPersistence.h"
 #include "../core/CommandRegistry.h"
 #include "../core/ServerMetrics.h"
+#include "../core/SnapshotPersistence.h"
 #include "../datastore/DataStore.h"
 #include "../parser/CommandParser.h"
 
@@ -22,11 +23,11 @@ public:
     TcpServer(std::string host, std::uint16_t port, DataStore& store,
               const CommandRegistry& registry, ServerMetrics& metrics,
               AofPersistence* aof = nullptr, std::string authPassword = "",
-              bool readOnly = false);
+              bool readOnly = false, SnapshotPersistence* snapshot = nullptr);
     TcpServer(std::string host, std::uint16_t port, std::deque<DataStore>& stores,
               const CommandRegistry& registry, ServerMetrics& metrics,
               AofPersistence* aof = nullptr, std::string authPassword = "",
-              bool readOnly = false);
+              bool readOnly = false, SnapshotPersistence* snapshot = nullptr);
 
     bool start();
     void stop();
@@ -42,6 +43,8 @@ private:
                                     bool authenticated) const;
     bool handleReadOnlyCommand(int clientFd, const ParsedCommand& command,
                                const std::vector<std::string>& tokens) const;
+    bool handlePersistenceCommand(int clientFd, const ParsedCommand& command,
+                                  const std::vector<std::string>& tokens) const;
     bool rejectReadOnlyWrite(int clientFd, const ParsedCommand& command,
                              const std::vector<std::string>& tokens) const;
     bool handleSelectCommand(int clientFd, const ParsedCommand& command,
@@ -70,6 +73,7 @@ private:
     const CommandRegistry& registry_;
     ServerMetrics& metrics_;
     AofPersistence* aof_;
+    SnapshotPersistence* snapshot_;
     std::string authPassword_;
     CommandParser parser_;
     int serverFd_{-1};
