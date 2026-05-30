@@ -24,7 +24,7 @@ The current implementation supports strings, lists, hashes, sets, logical databa
 - Pub/Sub messaging with `SUBSCRIBE`, `PUBLISH`, and `UNSUBSCRIBE`
 - Optional key-count and estimated-memory eviction limits
 - Eviction policies: `allkeys-lru`, `volatile-lru`, `ttl-priority`, and `random`
-- Keyspace inspection with `KEYS`, `TYPE`, `SCAN`, `RENAME`, and `FLUSHDB`
+- Keyspace inspection with `DBSIZE`, `KEYS`, `TYPE`, `SCAN`, `RENAME`, and `FLUSHDB`
 - Connection-local logical database selection with `SELECT`
 - Optional password authentication with `AUTH`
 - Configurable and runtime-switchable read-only mode with `READONLY`
@@ -352,6 +352,7 @@ Pub/Sub subscriptions are connection-local and are not persisted to snapshots or
 | Command | Description |
 | --- | --- |
 | `SELECT index` | Selects a logical database for the current connection. Defaults to database `0`. |
+| `DBSIZE` | Returns the number of live keys in the current logical database. |
 | `DEL key` | Deletes a key. Returns `1` if removed, otherwise `0`. |
 | `EXISTS key` | Returns `1` if the key exists and is not expired, otherwise `0`. |
 | `KEYS [pattern]` | Returns keys matching a glob-style pattern. Defaults to `*`. |
@@ -446,6 +447,8 @@ EXISTS name
 1
 TYPE name
 string
+DBSIZE
+1
 KEYS n*
 name
 RENAME name project:name

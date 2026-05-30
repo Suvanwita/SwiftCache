@@ -25,6 +25,7 @@ set(SWIFTCACHE_SOURCES
     src/commands/hash/HgetCommand.cpp
     src/commands/hash/HgetallCommand.cpp
     src/commands/hash/HsetCommand.cpp
+    src/commands/key/DbsizeCommand.cpp
     src/commands/key/FlushdbCommand.cpp
     src/commands/key/KeysCommand.cpp
     src/commands/key/RenameCommand.cpp

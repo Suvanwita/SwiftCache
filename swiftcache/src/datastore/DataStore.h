@@ -118,6 +118,7 @@ public:
     SetMembersResult smembers(const std::string& key);
     std::optional<std::size_t> scard(const std::string& key);
     std::vector<std::string> keys(const std::string& pattern = "*");
+    std::size_t dbsize();
     std::string type(const std::string& key);
     bool rename(const std::string& source, const std::string& destination);
     void flushdb();

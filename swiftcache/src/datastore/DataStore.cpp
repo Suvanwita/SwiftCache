@@ -845,6 +845,13 @@ std::vector<std::string> DataStore::keys(const std::string& pattern) {
     return result;
 }
 
+std::size_t DataStore::dbsize() {
+    removeExpired();
+
+    std::lock_guard<std::mutex> lock(mutex_);
+    return values_.size();
+}
+
 std::string DataStore::type(const std::string& key) {
     std::lock_guard<std::mutex> lock(mutex_);
     const auto it = values_.find(key);

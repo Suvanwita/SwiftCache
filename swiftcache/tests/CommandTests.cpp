@@ -134,7 +134,24 @@ int main() {
     assert(run(registry, store, {"SCAN", "0", "MATCH", "key:*"}).response ==
            "0\nkey:hash\nkey:list\nkey:set\nkey:string2\n");
     assert(run(registry, store, {"FLUSHDB"}).response == "OK\n");
+    assert(run(registry, store, {"DBSIZE"}).response == "0\n");
     assert(run(registry, store, {"KEYS"}).response == "");
+
+    swiftcache::DataStore dbsizeStore;
+    assert(run(registry, dbsizeStore, {"DBSIZE"}).response == "0\n");
+    assert(run(registry, dbsizeStore, {"SET", "plain", "1"}).response == "OK\n");
+    assert(run(registry, dbsizeStore, {"SET", "expires", "1", "EX", "1"}).response == "OK\n");
+    assert(run(registry, dbsizeStore, {"DBSIZE"}).response == "2\n");
+    std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+    assert(run(registry, dbsizeStore, {"DBSIZE"}).response == "1\n");
+
+    swiftcache::DataStore dbZero;
+    swiftcache::DataStore dbOne;
+    assert(run(registry, dbZero, {"SET", "shared", "zero"}).response == "OK\n");
+    assert(run(registry, dbOne, {"SET", "shared", "one"}).response == "OK\n");
+    assert(run(registry, dbOne, {"SET", "other", "one"}).response == "OK\n");
+    assert(run(registry, dbZero, {"DBSIZE"}).response == "1\n");
+    assert(run(registry, dbOne, {"DBSIZE"}).response == "2\n");
 
     swiftcache::DataStore lruStore;
     lruStore.configureEviction(swiftcache::EvictionConfig{2, 0, swiftcache::EvictionPolicy::AllKeysLru});
