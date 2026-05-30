@@ -19,7 +19,7 @@ const std::unordered_set<std::string> kMutatingCommands{
     "LPUSH", "RPUSH", "LPOP", "RPOP",
     "HSET", "HDEL",
     "SADD", "SREM",
-    "RENAME", "FLUSHDB", "FLUSHALL"
+    "RENAME", "MOVE", "FLUSHDB", "FLUSHALL"
 };
 
 } // namespace
@@ -60,6 +60,27 @@ bool AofPersistence::replay(const CommandRegistry& registry, std::deque<DataStor
             }
             for (auto& store : stores) {
                 store.flushdb();
+            }
+            continue;
+        }
+
+        if (commandName == "MOVE") {
+            if (command.tokens.size() != 3) {
+                std::cerr << "AOF replay skipped invalid MOVE command\n";
+                continue;
+            }
+
+            try {
+                std::size_t consumed = 0;
+                const auto parsed = std::stoull(command.tokens[2], &consumed);
+                if (consumed != command.tokens[2].size() || parsed >= stores.size()) {
+                    std::cerr << "AOF replay skipped out-of-range MOVE DB: "
+                              << command.tokens[2] << "\n";
+                    continue;
+                }
+                stores[databaseIndex].moveKeyTo(command.tokens[1], stores[parsed]);
+            } catch (const std::exception&) {
+                std::cerr << "AOF replay skipped invalid MOVE DB: " << command.tokens[2] << "\n";
             }
             continue;
         }

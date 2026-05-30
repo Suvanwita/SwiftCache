@@ -47,6 +47,9 @@ private:
     bool handleSelectCommand(int clientFd, const ParsedCommand& command,
                              const std::vector<std::string>& tokens,
                              std::size_t& databaseIndex) const;
+    bool handleMoveCommand(int clientFd, const ParsedCommand& command,
+                           const std::vector<std::string>& tokens,
+                           std::size_t databaseIndex) const;
     bool handleFlushAllCommand(int clientFd, const ParsedCommand& command,
                                const std::vector<std::string>& tokens,
                                std::size_t databaseIndex) const;

@@ -891,6 +891,40 @@ bool DataStore::rename(const std::string& source, const std::string& destination
     return true;
 }
 
+bool DataStore::moveKeyTo(const std::string& key, DataStore& destination) {
+    if (this == &destination) {
+        return false;
+    }
+
+    std::scoped_lock lock(mutex_, destination.mutex_);
+    const long long now = nowMillis();
+
+    auto sourceIt = values_.find(key);
+    if (sourceIt == values_.end()) {
+        return false;
+    }
+    if (isExpired(sourceIt->second, now)) {
+        values_.erase(sourceIt);
+        return false;
+    }
+
+    auto destinationIt = destination.values_.find(key);
+    if (destinationIt != destination.values_.end() &&
+        destination.isExpired(destinationIt->second, now)) {
+        destination.values_.erase(destinationIt);
+        destinationIt = destination.values_.end();
+    }
+    if (destinationIt != destination.values_.end()) {
+        return false;
+    }
+
+    sourceIt->second.lastAccessedAt = now;
+    destination.values_[key] = std::move(sourceIt->second);
+    values_.erase(sourceIt);
+    destination.evictIfNeededLocked();
+    return true;
+}
+
 void DataStore::flushdb() {
     std::lock_guard<std::mutex> lock(mutex_);
     values_.clear();

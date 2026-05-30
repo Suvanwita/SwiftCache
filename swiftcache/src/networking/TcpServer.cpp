@@ -180,7 +180,7 @@ bool isWriteCommand(const std::vector<std::string>& tokens) {
         "LPUSH", "RPUSH", "LPOP", "RPOP",
         "HSET", "HDEL",
         "SADD", "SREM",
-        "RENAME", "FLUSHDB", "FLUSHALL",
+        "RENAME", "MOVE", "FLUSHDB", "FLUSHALL",
         "PUBLISH"
     };
 
@@ -322,6 +322,9 @@ void TcpServer::handleClient(int clientFd) const {
                 }
                 if (rejectReadOnlyWrite(clientFd, command, command.tokens)) {
                     metrics_.commandRejected();
+                    continue;
+                }
+                if (handleMoveCommand(clientFd, command, command.tokens, databaseIndex)) {
                     continue;
                 }
                 if (handleFlushAllCommand(clientFd, command, command.tokens, databaseIndex)) {
@@ -466,6 +469,49 @@ bool TcpServer::handleSelectCommand(int clientFd, const ParsedCommand& command,
         } else {
             databaseIndex = selected;
             response = "OK\n";
+        }
+    }
+
+    if (isRejectedResponse(response)) {
+        metrics_.commandRejected();
+    }
+    if (command.protocol == RequestProtocol::Resp) {
+        response = formatRespResponse(response);
+    }
+    sendResponse(clientFd, response);
+    return true;
+}
+
+bool TcpServer::handleMoveCommand(int clientFd, const ParsedCommand& command,
+                                  const std::vector<std::string>& tokens,
+                                  std::size_t databaseIndex) const {
+    if (toUpper(tokens.front()) != "MOVE") {
+        return false;
+    }
+
+    std::string response;
+    if (tokens.size() != 3) {
+        response = "ERR wrong number of arguments for MOVE\n";
+    } else {
+        const std::size_t databaseCount = stores_ == nullptr ? 1 : stores_->size();
+        std::size_t destinationIndex = 0;
+        if (!parseDatabaseIndex(tokens[2], databaseCount, destinationIndex)) {
+            response = "ERR DB index is out of range\n";
+        } else {
+            bool appendSucceeded = true;
+            const auto moveKey = [this, &tokens, databaseIndex, destinationIndex]() {
+                const bool moved = stores_ != nullptr &&
+                    (*stores_)[databaseIndex].moveKeyTo(tokens[1], (*stores_)[destinationIndex]);
+                return CommandResult{std::string(moved ? "1\n" : "0\n"), false};
+            };
+
+            const auto result = aof_ == nullptr
+                ? moveKey()
+                : aof_->executeAndAppend(tokens, databaseIndex, moveKey, appendSucceeded);
+            response = result.response;
+            if (!appendSucceeded && isSuccessfulResponse(response)) {
+                std::cerr << "failed to append MOVE to AOF\n";
+            }
         }
     }
 

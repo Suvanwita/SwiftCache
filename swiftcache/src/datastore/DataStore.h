@@ -121,6 +121,7 @@ public:
     std::size_t dbsize();
     std::string type(const std::string& key);
     bool rename(const std::string& source, const std::string& destination);
+    bool moveKeyTo(const std::string& key, DataStore& destination);
     void flushdb();
     std::vector<SnapshotEntry> snapshot();
     void loadSnapshot(const std::vector<SnapshotEntry>& entries);

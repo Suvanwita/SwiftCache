@@ -207,12 +207,16 @@ int main() {
     assert(multiDbAof.append({"SET", "shared", "db0-again"}, 0));
     assert(multiDbAof.append({"FLUSHALL"}, 1));
     assert(multiDbAof.append({"SET", "after", "db1"}, 1));
+    assert(multiDbAof.append({"SET", "migrated", "db0"}, 0));
+    assert(multiDbAof.append({"MOVE", "migrated", "1"}, 0));
 
     std::deque<swiftcache::DataStore> replayedStores(2);
     assert(multiDbAof.replay(registry, replayedStores));
     assert(run(registry, replayedStores[0], {"GET", "shared"}).response == "(nil)\n");
     assert(run(registry, replayedStores[0], {"DBSIZE"}).response == "0\n");
     assert(run(registry, replayedStores[1], {"GET", "after"}).response == "db1\n");
+    assert(run(registry, replayedStores[1], {"GET", "migrated"}).response == "db0\n");
+    assert(run(registry, replayedStores[1], {"DBSIZE"}).response == "2\n");
     assert(run(registry, replayedStores[0], {"SMEMBERS", "tags"}).response == "");
     assert(run(registry, replayedStores[1], {"GET", "shared"}).response == "(nil)\n");
     assert(run(registry, replayedStores[1], {"SMEMBERS", "tags"}).response == "");
