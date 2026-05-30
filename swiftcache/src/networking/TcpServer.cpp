@@ -180,7 +180,7 @@ bool isWriteCommand(const std::vector<std::string>& tokens) {
         "LPUSH", "RPUSH", "LPOP", "RPOP",
         "HSET", "HDEL",
         "SADD", "SREM",
-        "RENAME", "FLUSHDB",
+        "RENAME", "FLUSHDB", "FLUSHALL",
         "PUBLISH"
     };
 
@@ -322,6 +322,9 @@ void TcpServer::handleClient(int clientFd) const {
                 }
                 if (rejectReadOnlyWrite(clientFd, command, command.tokens)) {
                     metrics_.commandRejected();
+                    continue;
+                }
+                if (handleFlushAllCommand(clientFd, command, command.tokens, databaseIndex)) {
                     continue;
                 }
                 if (handlePubSubCommand(clientFd, command, command.tokens)) {
@@ -493,6 +496,48 @@ bool TcpServer::sendResponse(int clientFd, const std::string& response) const {
         remaining -= static_cast<std::size_t>(sent);
     }
 
+    return true;
+}
+
+bool TcpServer::handleFlushAllCommand(int clientFd, const ParsedCommand& command,
+                                      const std::vector<std::string>& tokens,
+                                      std::size_t databaseIndex) const {
+    if (toUpper(tokens.front()) != "FLUSHALL") {
+        return false;
+    }
+
+    std::string response;
+    if (tokens.size() != 1) {
+        response = "ERR wrong number of arguments for FLUSHALL\n";
+    } else {
+        bool appendSucceeded = true;
+        const auto flushAll = [this]() {
+            if (stores_ != nullptr) {
+                for (auto& store : *stores_) {
+                    store.flushdb();
+                }
+            } else {
+                store_->flushdb();
+            }
+            return CommandResult{"OK\n", false};
+        };
+
+        const auto result = aof_ == nullptr
+            ? flushAll()
+            : aof_->executeAndAppend(tokens, databaseIndex, flushAll, appendSucceeded);
+        response = result.response;
+        if (!appendSucceeded && isSuccessfulResponse(response)) {
+            std::cerr << "failed to append FLUSHALL to AOF\n";
+        }
+    }
+
+    if (isRejectedResponse(response)) {
+        metrics_.commandRejected();
+    }
+    if (command.protocol == RequestProtocol::Resp) {
+        response = formatRespResponse(response);
+    }
+    sendResponse(clientFd, response);
     return true;
 }
 

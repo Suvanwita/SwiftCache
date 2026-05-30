@@ -19,7 +19,7 @@ const std::unordered_set<std::string> kMutatingCommands{
     "LPUSH", "RPUSH", "LPOP", "RPOP",
     "HSET", "HDEL",
     "SADD", "SREM",
-    "RENAME", "FLUSHDB"
+    "RENAME", "FLUSHDB", "FLUSHALL"
 };
 
 } // namespace
@@ -53,6 +53,17 @@ bool AofPersistence::replay(const CommandRegistry& registry, std::deque<DataStor
         }
 
         const auto commandName = toUpper(command.tokens.front());
+        if (commandName == "FLUSHALL") {
+            if (command.tokens.size() != 1) {
+                std::cerr << "AOF replay skipped invalid FLUSHALL command\n";
+                continue;
+            }
+            for (auto& store : stores) {
+                store.flushdb();
+            }
+            continue;
+        }
+
         if (commandName == "SELECT") {
             if (command.tokens.size() != 2) {
                 std::cerr << "AOF replay skipped invalid SELECT command\n";

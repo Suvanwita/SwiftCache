@@ -24,7 +24,7 @@ The current implementation supports strings, lists, hashes, sets, logical databa
 - Pub/Sub messaging with `SUBSCRIBE`, `PUBLISH`, and `UNSUBSCRIBE`
 - Optional key-count and estimated-memory eviction limits
 - Eviction policies: `allkeys-lru`, `volatile-lru`, `ttl-priority`, and `random`
-- Keyspace inspection with `DBSIZE`, `KEYS`, `TYPE`, `SCAN`, `RENAME`, and `FLUSHDB`
+- Keyspace inspection with `DBSIZE`, `KEYS`, `TYPE`, `SCAN`, `RENAME`, `FLUSHDB`, and `FLUSHALL`
 - Connection-local logical database selection with `SELECT`
 - Optional password authentication with `AUTH`
 - Configurable and runtime-switchable read-only mode with `READONLY`
@@ -293,7 +293,7 @@ Logged commands include writes and keyspace mutations such as:
 - `LPUSH`, `RPUSH`, `LPOP`, `RPOP`
 - `HSET`, `HDEL`
 - `SADD`, `SREM`
-- `RENAME`, `FLUSHDB`
+- `RENAME`, `FLUSHDB`, `FLUSHALL`
 - `SELECT` markers when writes target a different logical database
 
 Read-only commands such as `GET`, `TTL`, `KEYS`, `INFO`, and `SMEMBERS` are not written to the AOF.
@@ -359,6 +359,7 @@ Pub/Sub subscriptions are connection-local and are not persisted to snapshots or
 | `TYPE key` | Returns `string`, `list`, `hash`, `set`, or `none`. |
 | `RENAME source destination` | Renames an existing key while preserving its value and TTL. |
 | `FLUSHDB` | Removes all keys from the current datastore. |
+| `FLUSHALL` | Removes all keys from every logical database. |
 | `SCAN 0 [MATCH pattern]` | Returns cursor `0` and a sorted snapshot of matching keys. |
 
 ### TTL Commands
@@ -470,6 +471,23 @@ OK
 FLUSHDB
 OK
 KEYS
+```
+
+```text
+SET db0 value
+OK
+SELECT 1
+OK
+SET db1 value
+OK
+FLUSHALL
+OK
+DBSIZE
+0
+SELECT 0
+OK
+DBSIZE
+0
 ```
 
 ```text

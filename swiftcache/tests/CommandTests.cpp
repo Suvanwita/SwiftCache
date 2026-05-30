@@ -205,13 +205,17 @@ int main() {
     assert(multiDbAof.append({"SET", "shared", "db1"}, 1));
     assert(multiDbAof.append({"SADD", "tags", "isolated"}, 1));
     assert(multiDbAof.append({"SET", "shared", "db0-again"}, 0));
+    assert(multiDbAof.append({"FLUSHALL"}, 1));
+    assert(multiDbAof.append({"SET", "after", "db1"}, 1));
 
     std::deque<swiftcache::DataStore> replayedStores(2);
     assert(multiDbAof.replay(registry, replayedStores));
-    assert(run(registry, replayedStores[0], {"GET", "shared"}).response == "db0-again\n");
+    assert(run(registry, replayedStores[0], {"GET", "shared"}).response == "(nil)\n");
+    assert(run(registry, replayedStores[0], {"DBSIZE"}).response == "0\n");
+    assert(run(registry, replayedStores[1], {"GET", "after"}).response == "db1\n");
     assert(run(registry, replayedStores[0], {"SMEMBERS", "tags"}).response == "");
-    assert(run(registry, replayedStores[1], {"GET", "shared"}).response == "db1\n");
-    assert(run(registry, replayedStores[1], {"SMEMBERS", "tags"}).response == "isolated\n");
+    assert(run(registry, replayedStores[1], {"GET", "shared"}).response == "(nil)\n");
+    assert(run(registry, replayedStores[1], {"SMEMBERS", "tags"}).response == "");
     std::filesystem::remove(multiDbAofPath);
 
     const std::string snapshotPath = "/tmp/swiftcache-command-tests.snapshot";
