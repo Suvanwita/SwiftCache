@@ -80,6 +80,8 @@ int main() {
     assert(run(registry, store, {"APPEND", "word", "cache"}).response == "10\n");
     assert(run(registry, store, {"GET", "word"}).response == "swiftcache\n");
     assert(run(registry, store, {"STRLEN", "word"}).response == "10\n");
+    assert(std::stoull(run(registry, store, {"MEMORY", "USAGE", "word"}).response) > 0);
+    assert(run(registry, store, {"MEMORY", "USAGE", "missing"}).response == "(nil)\n");
     assert(run(registry, store, {"STRLEN", "missing"}).response == "0\n");
     assert(run(registry, store, {"MSET", "a", "1", "b", "2", "c", "3"}).response == "OK\n");
     assert(run(registry, store, {"MGET", "a", "missing", "c"}).response == "1\n(nil)\n3\n");
@@ -142,8 +144,10 @@ int main() {
     assert(run(registry, dbsizeStore, {"SET", "plain", "1"}).response == "OK\n");
     assert(run(registry, dbsizeStore, {"SET", "expires", "1", "EX", "1"}).response == "OK\n");
     assert(run(registry, dbsizeStore, {"DBSIZE"}).response == "2\n");
+    assert(std::stoull(run(registry, dbsizeStore, {"MEMORY", "USAGE", "expires"}).response) > 0);
     std::this_thread::sleep_for(std::chrono::milliseconds(1100));
     assert(run(registry, dbsizeStore, {"DBSIZE"}).response == "1\n");
+    assert(run(registry, dbsizeStore, {"MEMORY", "USAGE", "expires"}).response == "(nil)\n");
 
     swiftcache::DataStore dbZero;
     swiftcache::DataStore dbOne;

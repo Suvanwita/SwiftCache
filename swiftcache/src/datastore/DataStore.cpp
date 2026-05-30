@@ -852,6 +852,23 @@ std::size_t DataStore::dbsize() {
     return values_.size();
 }
 
+std::optional<std::size_t> DataStore::memoryUsage(const std::string& key) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const auto it = values_.find(key);
+    if (it == values_.end()) {
+        return std::nullopt;
+    }
+
+    const long long now = nowMillis();
+    if (isExpired(it->second, now)) {
+        values_.erase(it);
+        return std::nullopt;
+    }
+
+    it->second.lastAccessedAt = now;
+    return estimateObjectBytes(it->first, it->second);
+}
+
 std::string DataStore::type(const std::string& key) {
     std::lock_guard<std::mutex> lock(mutex_);
     const auto it = values_.find(key);

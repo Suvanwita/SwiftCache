@@ -24,7 +24,7 @@ The current implementation supports strings, lists, hashes, sets, logical databa
 - Pub/Sub messaging with `SUBSCRIBE`, `PUBLISH`, and `UNSUBSCRIBE`
 - Optional key-count and estimated-memory eviction limits
 - Eviction policies: `allkeys-lru`, `volatile-lru`, `ttl-priority`, and `random`
-- Keyspace inspection with `DBSIZE`, `KEYS`, `TYPE`, `SCAN`, `RENAME`, `MOVE`, `FLUSHDB`, and `FLUSHALL`
+- Keyspace inspection with `DBSIZE`, `MEMORY USAGE`, `KEYS`, `TYPE`, `SCAN`, `RENAME`, `MOVE`, `FLUSHDB`, and `FLUSHALL`
 - Connection-local logical database selection with `SELECT`
 - Optional password authentication with `AUTH`
 - Configurable and runtime-switchable read-only mode with `READONLY`
@@ -211,7 +211,7 @@ Eviction is disabled by default. Set `max_keys`, `max_memory`, or both, then cho
 | `ttl-priority` | Evicts keys with the nearest expiration time first. If no TTL keys exist, the limit may remain exceeded. |
 | `random` | Evicts random keys. |
 
-`max_memory` uses SwiftCache's internal estimate of stored key/value data. It is useful for cache pressure behavior, but it is not the same as operating-system RSS memory.
+`max_memory` and `MEMORY USAGE` use SwiftCache's internal estimate of stored key/value data. They are useful for cache pressure behavior and key-level inspection, but they are not the same as operating-system RSS memory.
 
 ## Connecting And Protocols
 
@@ -357,6 +357,7 @@ Pub/Sub subscriptions are connection-local and are not persisted to snapshots or
 | --- | --- |
 | `SELECT index` | Selects a logical database for the current connection. Defaults to database `0`. |
 | `DBSIZE` | Returns the number of live keys in the current logical database. |
+| `MEMORY USAGE key` | Returns SwiftCache's estimated bytes used by a key, or `(nil)` for a missing key. |
 | `DEL key` | Deletes a key. Returns `1` if removed, otherwise `0`. |
 | `EXISTS key` | Returns `1` if the key exists and is not expired, otherwise `0`. |
 | `KEYS [pattern]` | Returns keys matching a glob-style pattern. Defaults to `*`. |
@@ -462,6 +463,8 @@ EXISTS name
 1
 TYPE name
 string
+MEMORY USAGE name
+248
 DBSIZE
 1
 KEYS n*

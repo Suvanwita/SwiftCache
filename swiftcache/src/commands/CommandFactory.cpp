@@ -8,6 +8,7 @@
 #include "key/DbsizeCommand.h"
 #include "key/FlushdbCommand.h"
 #include "key/KeysCommand.h"
+#include "key/MemoryCommand.h"
 #include "key/RenameCommand.h"
 #include "key/ScanCommand.h"
 #include "key/TypeCommand.h"
@@ -73,6 +74,7 @@ CommandRegistry buildCommandRegistry(std::chrono::steady_clock::time_point start
     registry.registerCommand(std::make_unique<ScardCommand>());
     registry.registerCommand(std::make_unique<KeysCommand>());
     registry.registerCommand(std::make_unique<DbsizeCommand>());
+    registry.registerCommand(std::make_unique<MemoryCommand>());
     registry.registerCommand(std::make_unique<TypeCommand>());
     registry.registerCommand(std::make_unique<RenameCommand>());
     registry.registerCommand(std::make_unique<FlushdbCommand>());

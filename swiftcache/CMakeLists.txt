@@ -28,6 +28,7 @@ set(SWIFTCACHE_SOURCES
     src/commands/key/DbsizeCommand.cpp
     src/commands/key/FlushdbCommand.cpp
     src/commands/key/KeysCommand.cpp
+    src/commands/key/MemoryCommand.cpp
     src/commands/key/RenameCommand.cpp
     src/commands/key/ScanCommand.cpp
     src/commands/key/TypeCommand.cpp
