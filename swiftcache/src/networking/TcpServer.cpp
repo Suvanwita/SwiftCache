@@ -1,5 +1,6 @@
 #include "TcpServer.h"
 
+#include <algorithm>
 #include <arpa/inet.h>
 #include <cerrno>
 #include <cctype>
@@ -213,6 +214,24 @@ std::string evictionPolicyName(EvictionPolicy policy) {
     return "unknown";
 }
 
+std::string protocolName(RequestProtocol protocol) {
+    return protocol == RequestProtocol::Resp ? "resp" : "inline";
+}
+
+bool parseUnsignedId(const std::string& value, std::uint64_t& parsed) {
+    if (value.empty() || value.front() == '-') {
+        return false;
+    }
+
+    try {
+        std::size_t consumed = 0;
+        parsed = std::stoull(value, &consumed);
+        return consumed == value.size();
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
 } // namespace
 
 TcpServer::TcpServer(std::string host, std::uint16_t port, DataStore& store,
@@ -303,6 +322,7 @@ void TcpServer::handleClient(int clientFd) const {
     bool greetingSent = false;
     bool authenticated = authPassword_.empty();
     std::size_t databaseIndex = 0;
+    registerClient(clientFd, authenticated);
 
     std::string pending;
     char buffer[kBufferSize];
@@ -325,6 +345,7 @@ void TcpServer::handleClient(int clientFd) const {
             if (!greetingSent && command.protocol == RequestProtocol::Inline) {
                 if (!sendResponse(clientFd, "Connected to SwiftCache\n")) {
                     removeClientSubscriptions(clientFd);
+                    unregisterClient(clientFd);
                     closeIfOpen(clientFd);
                     metrics_.clientDisconnected();
                     return;
@@ -334,7 +355,9 @@ void TcpServer::handleClient(int clientFd) const {
 
             if (!command.tokens.empty()) {
                 metrics_.commandExecuted(toUpper(command.tokens.front()));
+                updateClientState(clientFd, command.protocol, databaseIndex, authenticated);
                 if (handleAuthCommand(clientFd, command, command.tokens, authenticated)) {
+                    updateClientState(clientFd, command.protocol, databaseIndex, authenticated);
                     continue;
                 }
                 if (!requireAuthenticatedClient(clientFd, command.protocol, authenticated)) {
@@ -350,10 +373,14 @@ void TcpServer::handleClient(int clientFd) const {
                 if (handleCommandCommand(clientFd, command, command.tokens)) {
                     continue;
                 }
+                if (handleClientCommand(clientFd, command, command.tokens)) {
+                    continue;
+                }
                 if (handlePersistenceCommand(clientFd, command, command.tokens)) {
                     continue;
                 }
                 if (handleSelectCommand(clientFd, command, command.tokens, databaseIndex)) {
+                    updateClientState(clientFd, command.protocol, databaseIndex, authenticated);
                     continue;
                 }
                 if (rejectReadOnlyWrite(clientFd, command, command.tokens)) {
@@ -388,6 +415,7 @@ void TcpServer::handleClient(int clientFd) const {
                     : result.response;
                 if (!sendResponse(clientFd, response) || result.closeConnection) {
                     removeClientSubscriptions(clientFd);
+                    unregisterClient(clientFd);
                     closeIfOpen(clientFd);
                     metrics_.clientDisconnected();
                     return;
@@ -397,6 +425,7 @@ void TcpServer::handleClient(int clientFd) const {
     }
 
     removeClientSubscriptions(clientFd);
+    unregisterClient(clientFd);
     closeIfOpen(clientFd);
     metrics_.clientDisconnected();
 }
@@ -537,6 +566,86 @@ bool TcpServer::handleCommandCommand(int clientFd, const ParsedCommand& command,
         response = formatRespResponse(response);
     }
     sendResponse(clientFd, response);
+    return true;
+}
+
+bool TcpServer::handleClientCommand(int clientFd, const ParsedCommand& command,
+                                    const std::vector<std::string>& tokens) const {
+    if (toUpper(tokens.front()) != "CLIENT") {
+        return false;
+    }
+
+    std::string response;
+    int killFd = -1;
+    const auto subcommand = tokens.size() >= 2 ? toUpper(tokens[1]) : "";
+
+    if (subcommand == "COUNT" && tokens.size() == 2) {
+        response = std::to_string(metrics_.connectedClients()) + "\n";
+    } else if (subcommand == "LIST" && tokens.size() == 2) {
+        std::vector<ClientConnectionInfo> clients;
+        {
+            std::lock_guard<std::mutex> lock(clientsMutex_);
+            clients.reserve(clients_.size());
+            for (const auto& [_, client] : clients_) {
+                clients.push_back(client);
+            }
+        }
+        std::sort(clients.begin(), clients.end(), [](const auto& lhs, const auto& rhs) {
+            return lhs.id < rhs.id;
+        });
+
+        std::ostringstream out;
+        for (const auto& client : clients) {
+            out << formatClientInfo(client);
+        }
+        response = out.str();
+    } else if (subcommand == "INFO" && tokens.size() == 2) {
+        std::lock_guard<std::mutex> lock(clientsMutex_);
+        const auto it = clients_.find(clientFd);
+        response = it == clients_.end() ? "" : formatClientInfo(it->second);
+    } else if (subcommand == "SETNAME" && tokens.size() == 3) {
+        std::lock_guard<std::mutex> lock(clientsMutex_);
+        const auto it = clients_.find(clientFd);
+        if (it != clients_.end()) {
+            it->second.name = tokens[2];
+        }
+        response = "OK\n";
+    } else if (subcommand == "GETNAME" && tokens.size() == 2) {
+        std::lock_guard<std::mutex> lock(clientsMutex_);
+        const auto it = clients_.find(clientFd);
+        if (it == clients_.end() || it->second.name.empty()) {
+            response = "(nil)\n";
+        } else {
+            response = it->second.name + "\n";
+        }
+    } else if (subcommand == "KILL" && tokens.size() == 3) {
+        std::uint64_t id = 0;
+        if (!parseUnsignedId(tokens[2], id)) {
+            response = "ERR invalid client id\n";
+        } else {
+            std::lock_guard<std::mutex> lock(clientsMutex_);
+            for (const auto& [fd, client] : clients_) {
+                if (client.id == id) {
+                    killFd = fd;
+                    break;
+                }
+            }
+            response = killFd >= 0 ? "1\n" : "0\n";
+        }
+    } else {
+        response = "ERR usage: CLIENT LIST|COUNT|INFO|GETNAME|SETNAME name|KILL id\n";
+    }
+
+    if (isRejectedResponse(response)) {
+        metrics_.commandRejected();
+    }
+    if (command.protocol == RequestProtocol::Resp) {
+        response = formatRespResponse(response);
+    }
+    sendResponse(clientFd, response);
+    if (killFd >= 0) {
+        closeIfOpen(killFd);
+    }
     return true;
 }
 
@@ -852,6 +961,59 @@ std::string TcpServer::publish(RequestProtocol protocol, const std::string& chan
         return ":" + std::to_string(delivered) + "\r\n";
     }
     return std::to_string(delivered) + "\n";
+}
+
+std::uint64_t TcpServer::registerClient(int clientFd, bool authenticated) const {
+    ClientConnectionInfo info;
+    info.id = nextClientId_.fetch_add(1, std::memory_order_relaxed);
+    info.fd = clientFd;
+    info.authenticated = authenticated;
+    info.connectedAt = std::chrono::steady_clock::now();
+
+    std::lock_guard<std::mutex> lock(clientsMutex_);
+    clients_[clientFd] = info;
+    return info.id;
+}
+
+void TcpServer::unregisterClient(int clientFd) const {
+    std::lock_guard<std::mutex> lock(clientsMutex_);
+    clients_.erase(clientFd);
+}
+
+void TcpServer::updateClientState(int clientFd, RequestProtocol protocol,
+                                  std::size_t databaseIndex, bool authenticated) const {
+    std::lock_guard<std::mutex> lock(clientsMutex_);
+    const auto it = clients_.find(clientFd);
+    if (it == clients_.end()) {
+        return;
+    }
+
+    it->second.protocol = protocol;
+    it->second.databaseIndex = databaseIndex;
+    it->second.authenticated = authenticated;
+}
+
+std::size_t TcpServer::clientSubscriptionCount(int clientFd) const {
+    std::lock_guard<std::mutex> lock(pubsubMutex_);
+    const auto it = clientSubscriptions_.find(clientFd);
+    return it == clientSubscriptions_.end() ? 0 : it->second.size();
+}
+
+std::string TcpServer::formatClientInfo(const ClientConnectionInfo& client) const {
+    const auto age = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::steady_clock::now() - client.connectedAt).count();
+
+    std::ostringstream out;
+    out << "id=" << client.id
+        << " fd=" << client.fd
+        << " db=" << client.databaseIndex
+        << " protocol=" << protocolName(client.protocol)
+        << " authenticated=" << (client.authenticated ? 1 : 0)
+        << " name=" << (client.name.empty() ? "-" : client.name)
+        << " subscriptions=" << clientSubscriptionCount(client.fd)
+        << " age_seconds=" << age
+        << "\n";
+    return out.str();
 }
 
 void TcpServer::removeClientSubscriptions(int clientFd) const {

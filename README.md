@@ -339,6 +339,12 @@ Snapshot files are written through a temporary file and atomically renamed into 
 | `INFO` | Returns server, persistence, command, client, and datastore metrics. |
 | `CONFIG GET key` | Returns runtime configuration pairs for `databases`, `readonly`, `max_keys`, `max_memory`, `eviction_policy`, `requirepass`, or `*`. |
 | `COMMAND STATS` | Returns per-command execution counters. |
+| `CLIENT LIST` | Returns active client connections with ID, DB, protocol, auth state, name, subscription count, and connected age. |
+| `CLIENT INFO` | Returns the same metadata for the current connection only. |
+| `CLIENT COUNT` | Returns the current number of connected clients. |
+| `CLIENT SETNAME name` | Sets a debug name for the current connection. |
+| `CLIENT GETNAME` | Returns the current connection name or `(nil)`. |
+| `CLIENT KILL id` | Closes the client connection with the matching ID. Returns `1` if found, otherwise `0`. |
 | `READONLY [ON\|OFF]` | Returns read-only status as `1` or `0`, or toggles read-only mode at runtime. |
 | `SAVE` | Writes a foreground snapshot immediately and checkpoints the AOF when enabled. |
 | `LASTSAVE` | Returns the Unix timestamp of the last successful snapshot, or `0` if none has completed. |
@@ -469,6 +475,14 @@ INFO 1
 LASTSAVE 2
 PING 1
 SAVE 1
+CLIENT SETNAME worker-1
+OK
+CLIENT GETNAME
+worker-1
+CLIENT INFO
+id=1 fd=4 db=0 protocol=inline authenticated=1 name=worker-1 subscriptions=0 age_seconds=8
+CLIENT COUNT
+1
 ```
 
 ```text

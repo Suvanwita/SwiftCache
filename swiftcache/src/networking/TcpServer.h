@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <deque>
 #include <mutex>
@@ -17,6 +18,16 @@
 #include "../parser/CommandParser.h"
 
 namespace swiftcache {
+
+struct ClientConnectionInfo {
+    std::uint64_t id{0};
+    int fd{-1};
+    std::size_t databaseIndex{0};
+    RequestProtocol protocol{RequestProtocol::Inline};
+    bool authenticated{false};
+    std::string name;
+    std::chrono::steady_clock::time_point connectedAt;
+};
 
 class TcpServer {
 public:
@@ -49,6 +60,8 @@ private:
                              const std::vector<std::string>& tokens) const;
     bool handleCommandCommand(int clientFd, const ParsedCommand& command,
                               const std::vector<std::string>& tokens) const;
+    bool handleClientCommand(int clientFd, const ParsedCommand& command,
+                             const std::vector<std::string>& tokens) const;
     bool handlePersistenceCommand(int clientFd, const ParsedCommand& command,
                                   const std::vector<std::string>& tokens) const;
     bool rejectReadOnlyWrite(int clientFd, const ParsedCommand& command,
@@ -70,6 +83,12 @@ private:
                             const std::vector<std::string>& channels) const;
     std::string publish(RequestProtocol protocol, const std::string& channel,
                         const std::string& message) const;
+    std::uint64_t registerClient(int clientFd, bool authenticated) const;
+    void unregisterClient(int clientFd) const;
+    void updateClientState(int clientFd, RequestProtocol protocol, std::size_t databaseIndex,
+                           bool authenticated) const;
+    std::size_t clientSubscriptionCount(int clientFd) const;
+    std::string formatClientInfo(const ClientConnectionInfo& client) const;
     void removeClientSubscriptions(int clientFd) const;
 
     std::string host_;
@@ -86,10 +105,13 @@ private:
     int serverFd_{-1};
     std::atomic<bool> running_{false};
     mutable std::atomic<bool> readOnly_{false};
+    mutable std::atomic<std::uint64_t> nextClientId_{1};
     mutable std::mutex sendMutex_;
     mutable std::mutex pubsubMutex_;
+    mutable std::mutex clientsMutex_;
     mutable std::unordered_map<std::string, std::unordered_map<int, RequestProtocol>> channelSubscribers_;
     mutable std::unordered_map<int, std::unordered_set<std::string>> clientSubscriptions_;
+    mutable std::unordered_map<int, ClientConnectionInfo> clients_;
 };
 
 } // namespace swiftcache
