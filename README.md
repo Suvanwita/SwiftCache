@@ -338,6 +338,7 @@ Snapshot files are written through a temporary file and atomically renamed into 
 | `PING` | Returns `PONG`. |
 | `INFO` | Returns server, persistence, command, client, and datastore metrics. |
 | `CONFIG GET key` | Returns runtime configuration pairs for `databases`, `readonly`, `max_keys`, `max_memory`, `eviction_policy`, `requirepass`, or `*`. |
+| `COMMAND STATS` | Returns per-command execution counters. |
 | `READONLY [ON\|OFF]` | Returns read-only status as `1` or `0`, or toggles read-only mode at runtime. |
 | `SAVE` | Writes a foreground snapshot immediately and checkpoints the AOF when enabled. |
 | `LASTSAVE` | Returns the Unix timestamp of the last successful snapshot, or `0` if none has completed. |
@@ -461,6 +462,13 @@ false
 CONFIG GET requirepass
 requirepass
 ******
+COMMAND STATS
+COMMAND 1
+CONFIG 2
+INFO 1
+LASTSAVE 2
+PING 1
+SAVE 1
 ```
 
 ```text

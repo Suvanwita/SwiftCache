@@ -347,6 +347,9 @@ void TcpServer::handleClient(int clientFd) const {
                 if (handleConfigCommand(clientFd, command, command.tokens)) {
                     continue;
                 }
+                if (handleCommandCommand(clientFd, command, command.tokens)) {
+                    continue;
+                }
                 if (handlePersistenceCommand(clientFd, command, command.tokens)) {
                     continue;
                 }
@@ -496,6 +499,33 @@ bool TcpServer::handleConfigCommand(int clientFd, const ParsedCommand& command,
             if (key == "*" || key == item.first) {
                 out << item.first << "\n" << item.second << "\n";
             }
+        }
+        response = out.str();
+    }
+
+    if (isRejectedResponse(response)) {
+        metrics_.commandRejected();
+    }
+    if (command.protocol == RequestProtocol::Resp) {
+        response = formatRespResponse(response);
+    }
+    sendResponse(clientFd, response);
+    return true;
+}
+
+bool TcpServer::handleCommandCommand(int clientFd, const ParsedCommand& command,
+                                     const std::vector<std::string>& tokens) const {
+    if (toUpper(tokens.front()) != "COMMAND") {
+        return false;
+    }
+
+    std::string response;
+    if (tokens.size() != 2 || toUpper(tokens[1]) != "STATS") {
+        response = "ERR usage: COMMAND STATS\n";
+    } else {
+        std::ostringstream out;
+        for (const auto& [commandName, count] : metrics_.commandCounts()) {
+            out << commandName << " " << count << "\n";
         }
         response = out.str();
     }

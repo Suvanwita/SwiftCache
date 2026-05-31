@@ -47,6 +47,8 @@ private:
                                const std::vector<std::string>& tokens) const;
     bool handleConfigCommand(int clientFd, const ParsedCommand& command,
                              const std::vector<std::string>& tokens) const;
+    bool handleCommandCommand(int clientFd, const ParsedCommand& command,
+                              const std::vector<std::string>& tokens) const;
     bool handlePersistenceCommand(int clientFd, const ParsedCommand& command,
                                   const std::vector<std::string>& tokens) const;
     bool rejectReadOnlyWrite(int clientFd, const ParsedCommand& command,
