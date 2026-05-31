@@ -8,6 +8,7 @@
 
 #include "../src/commands/CommandFactory.h"
 #include "../src/core/AofPersistence.h"
+#include "../src/core/CommandMetadata.h"
 #include "../src/core/SnapshotPersistence.h"
 #include "../src/datastore/DataStore.h"
 #include "../src/parser/CommandParser.h"
@@ -27,6 +28,14 @@ int main() {
     swiftcache::ServerMetrics metrics;
     auto registry = swiftcache::buildCommandRegistry(std::chrono::steady_clock::now(), metrics);
     swiftcache::CommandParser parser;
+
+    assert(swiftcache::isAofLoggedCommand({"SET", "key", "value"}));
+    assert(swiftcache::isAofLoggedCommand({"MOVE", "key", "1"}));
+    assert(!swiftcache::isAofLoggedCommand({"GET", "key"}));
+    assert(!swiftcache::isAllowedInReadOnly({"SET", "key", "value"}));
+    assert(!swiftcache::isAllowedInReadOnly({"PUBLISH", "events", "message"}));
+    assert(swiftcache::isAllowedInReadOnly({"SAVE"}));
+    assert(swiftcache::isAllowedInReadOnly({"CLIENT", "LIST"}));
 
     std::string inlineBuffer = "SET protocol inline\nGET protocol\n";
     const auto inlineCommands = parser.parseAvailable(inlineBuffer);

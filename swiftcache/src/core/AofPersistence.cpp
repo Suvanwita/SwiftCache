@@ -5,24 +5,12 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
-#include <unordered_set>
 
+#include "CommandMetadata.h"
 #include "../parser/CommandParser.h"
 #include "../utils/StringUtils.h"
 
 namespace swiftcache {
-namespace {
-
-const std::unordered_set<std::string> kMutatingCommands{
-    "SET", "MSET", "DEL", "EXPIRE", "PERSIST",
-    "INCR", "DECR", "APPEND",
-    "LPUSH", "RPUSH", "LPOP", "RPOP",
-    "HSET", "HDEL",
-    "SADD", "SREM",
-    "RENAME", "MOVE", "FLUSHDB", "FLUSHALL"
-};
-
-} // namespace
 
 AofPersistence::AofPersistence(std::string path) : path_(std::move(path)) {}
 
@@ -191,10 +179,7 @@ bool AofPersistence::checkpoint(const std::function<bool()>& saveSnapshot) {
 }
 
 bool AofPersistence::isMutatingCommand(const std::vector<std::string>& tokens) const {
-    if (tokens.empty()) {
-        return false;
-    }
-    return kMutatingCommands.find(toUpper(tokens.front())) != kMutatingCommands.end();
+    return isAofLoggedCommand(tokens);
 }
 
 std::uintmax_t AofPersistence::sizeBytes() const {

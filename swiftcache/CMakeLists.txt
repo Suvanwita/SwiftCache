@@ -10,6 +10,7 @@ find_package(Threads REQUIRED)
 
 set(SWIFTCACHE_SOURCES
     src/core/AofPersistence.cpp
+    src/core/CommandMetadata.cpp
     src/core/CommandRegistry.cpp
     src/core/ExpiryWorker.cpp
     src/core/ServerMetrics.cpp

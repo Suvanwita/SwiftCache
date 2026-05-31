@@ -13,10 +13,10 @@
 #include <sys/socket.h>
 #include <sys/select.h>
 #include <thread>
-#include <unordered_set>
 #include <unistd.h>
 #include <utility>
 
+#include "../core/CommandMetadata.h"
 #include "../parser/CommandParser.h"
 #include "../utils/StringUtils.h"
 
@@ -172,23 +172,6 @@ bool parseDatabaseIndex(const std::string& raw, std::size_t databaseCount,
     } catch (const std::exception&) {
         return false;
     }
-}
-
-bool isWriteCommand(const std::vector<std::string>& tokens) {
-    static const std::unordered_set<std::string> kWriteCommands{
-        "SET", "MSET", "DEL", "EXPIRE", "PERSIST",
-        "INCR", "DECR", "APPEND",
-        "LPUSH", "RPUSH", "LPOP", "RPOP",
-        "HSET", "HDEL",
-        "SADD", "SREM",
-        "RENAME", "MOVE", "FLUSHDB", "FLUSHALL",
-        "PUBLISH"
-    };
-
-    if (tokens.empty()) {
-        return false;
-    }
-    return kWriteCommands.find(toUpper(tokens.front())) != kWriteCommands.end();
 }
 
 std::string toLowerAscii(std::string value) {
@@ -692,7 +675,7 @@ bool TcpServer::handlePersistenceCommand(int clientFd, const ParsedCommand& comm
 
 bool TcpServer::rejectReadOnlyWrite(int clientFd, const ParsedCommand& command,
                                     const std::vector<std::string>& tokens) const {
-    if (!readOnly_.load() || !isWriteCommand(tokens)) {
+    if (!readOnly_.load() || isAllowedInReadOnly(tokens)) {
         return false;
     }
 
