@@ -190,23 +190,46 @@ bool isWriteCommand(const std::vector<std::string>& tokens) {
     return kWriteCommands.find(toUpper(tokens.front())) != kWriteCommands.end();
 }
 
+std::string toLowerAscii(std::string value) {
+    for (auto& ch : value) {
+        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    }
+    return value;
+}
+
+std::string evictionPolicyName(EvictionPolicy policy) {
+    switch (policy) {
+    case EvictionPolicy::None:
+        return "none";
+    case EvictionPolicy::AllKeysLru:
+        return "allkeys-lru";
+    case EvictionPolicy::VolatileLru:
+        return "volatile-lru";
+    case EvictionPolicy::TtlPriority:
+        return "ttl-priority";
+    case EvictionPolicy::Random:
+        return "random";
+    }
+    return "unknown";
+}
+
 } // namespace
 
 TcpServer::TcpServer(std::string host, std::uint16_t port, DataStore& store,
                      const CommandRegistry& registry, ServerMetrics& metrics,
                      AofPersistence* aof, std::string authPassword, bool readOnly,
-                     SnapshotPersistence* snapshot)
+                     SnapshotPersistence* snapshot, EvictionConfig evictionConfig)
     : host_(std::move(host)), port_(port), store_(&store), stores_(nullptr), registry_(registry),
-      metrics_(metrics), aof_(aof), snapshot_(snapshot), authPassword_(std::move(authPassword)),
-      readOnly_(readOnly) {}
+      metrics_(metrics), aof_(aof), snapshot_(snapshot), evictionConfig_(evictionConfig),
+      authPassword_(std::move(authPassword)), readOnly_(readOnly) {}
 
 TcpServer::TcpServer(std::string host, std::uint16_t port, std::deque<DataStore>& stores,
                      const CommandRegistry& registry, ServerMetrics& metrics,
                      AofPersistence* aof, std::string authPassword, bool readOnly,
-                     SnapshotPersistence* snapshot)
+                     SnapshotPersistence* snapshot, EvictionConfig evictionConfig)
     : host_(std::move(host)), port_(port), store_(nullptr), stores_(&stores), registry_(registry),
-      metrics_(metrics), aof_(aof), snapshot_(snapshot), authPassword_(std::move(authPassword)),
-      readOnly_(readOnly) {}
+      metrics_(metrics), aof_(aof), snapshot_(snapshot), evictionConfig_(evictionConfig),
+      authPassword_(std::move(authPassword)), readOnly_(readOnly) {}
 
 bool TcpServer::start() {
     serverFd_ = socket(AF_INET, SOCK_STREAM, 0);
@@ -321,6 +344,9 @@ void TcpServer::handleClient(int clientFd) const {
                 if (handleReadOnlyCommand(clientFd, command, command.tokens)) {
                     continue;
                 }
+                if (handleConfigCommand(clientFd, command, command.tokens)) {
+                    continue;
+                }
                 if (handlePersistenceCommand(clientFd, command, command.tokens)) {
                     continue;
                 }
@@ -432,6 +458,46 @@ bool TcpServer::handleReadOnlyCommand(int clientFd, const ParsedCommand& command
         response = "OK\n";
     } else {
         response = "ERR usage: READONLY [ON|OFF]\n";
+    }
+
+    if (isRejectedResponse(response)) {
+        metrics_.commandRejected();
+    }
+    if (command.protocol == RequestProtocol::Resp) {
+        response = formatRespResponse(response);
+    }
+    sendResponse(clientFd, response);
+    return true;
+}
+
+bool TcpServer::handleConfigCommand(int clientFd, const ParsedCommand& command,
+                                    const std::vector<std::string>& tokens) const {
+    if (toUpper(tokens.front()) != "CONFIG") {
+        return false;
+    }
+
+    std::string response;
+    if (tokens.size() != 3 || toUpper(tokens[1]) != "GET") {
+        response = "ERR usage: CONFIG GET key\n";
+    } else {
+        const auto key = toLowerAscii(tokens[2]);
+        const auto databaseCount = stores_ == nullptr ? 1 : stores_->size();
+        const std::vector<std::pair<std::string, std::string>> values{
+            {"databases", std::to_string(databaseCount)},
+            {"readonly", readOnly_.load() ? "true" : "false"},
+            {"max_keys", std::to_string(evictionConfig_.maxKeys)},
+            {"max_memory", std::to_string(evictionConfig_.maxMemoryBytes)},
+            {"eviction_policy", evictionPolicyName(evictionConfig_.policy)},
+            {"requirepass", authPassword_.empty() ? "" : "******"}
+        };
+
+        std::ostringstream out;
+        for (const auto& item : values) {
+            if (key == "*" || key == item.first) {
+                out << item.first << "\n" << item.second << "\n";
+            }
+        }
+        response = out.str();
     }
 
     if (isRejectedResponse(response)) {

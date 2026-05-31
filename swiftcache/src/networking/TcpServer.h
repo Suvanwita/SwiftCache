@@ -23,11 +23,13 @@ public:
     TcpServer(std::string host, std::uint16_t port, DataStore& store,
               const CommandRegistry& registry, ServerMetrics& metrics,
               AofPersistence* aof = nullptr, std::string authPassword = "",
-              bool readOnly = false, SnapshotPersistence* snapshot = nullptr);
+              bool readOnly = false, SnapshotPersistence* snapshot = nullptr,
+              EvictionConfig evictionConfig = {});
     TcpServer(std::string host, std::uint16_t port, std::deque<DataStore>& stores,
               const CommandRegistry& registry, ServerMetrics& metrics,
               AofPersistence* aof = nullptr, std::string authPassword = "",
-              bool readOnly = false, SnapshotPersistence* snapshot = nullptr);
+              bool readOnly = false, SnapshotPersistence* snapshot = nullptr,
+              EvictionConfig evictionConfig = {});
 
     bool start();
     void stop();
@@ -43,6 +45,8 @@ private:
                                     bool authenticated) const;
     bool handleReadOnlyCommand(int clientFd, const ParsedCommand& command,
                                const std::vector<std::string>& tokens) const;
+    bool handleConfigCommand(int clientFd, const ParsedCommand& command,
+                             const std::vector<std::string>& tokens) const;
     bool handlePersistenceCommand(int clientFd, const ParsedCommand& command,
                                   const std::vector<std::string>& tokens) const;
     bool rejectReadOnlyWrite(int clientFd, const ParsedCommand& command,
@@ -74,6 +78,7 @@ private:
     ServerMetrics& metrics_;
     AofPersistence* aof_;
     SnapshotPersistence* snapshot_;
+    EvictionConfig evictionConfig_;
     std::string authPassword_;
     CommandParser parser_;
     int serverFd_{-1};

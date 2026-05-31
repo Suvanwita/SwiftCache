@@ -337,6 +337,7 @@ Snapshot files are written through a temporary file and atomically renamed into 
 | `AUTH password` | Authenticates the current connection when password authentication is enabled. |
 | `PING` | Returns `PONG`. |
 | `INFO` | Returns server, persistence, command, client, and datastore metrics. |
+| `CONFIG GET key` | Returns runtime configuration pairs for `databases`, `readonly`, `max_keys`, `max_memory`, `eviction_policy`, `requirepass`, or `*`. |
 | `READONLY [ON\|OFF]` | Returns read-only status as `1` or `0`, or toggles read-only mode at runtime. |
 | `SAVE` | Writes a foreground snapshot immediately and checkpoints the AOF when enabled. |
 | `LASTSAVE` | Returns the Unix timestamp of the last successful snapshot, or `0` if none has completed. |
@@ -454,6 +455,12 @@ SAVE
 OK
 LASTSAVE
 1717000000
+CONFIG GET readonly
+readonly
+false
+CONFIG GET requirepass
+requirepass
+******
 ```
 
 ```text
